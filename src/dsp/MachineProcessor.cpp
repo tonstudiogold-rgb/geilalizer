@@ -25,6 +25,8 @@ void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
     for (auto& scratch : channelScratch_)
         scratch.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
     namAdapter_.prepare(sampleRate_, maxBlockSize_);
+    irAdapter_.prepare(sampleRate_, maxBlockSize_);
+    irAdapter_.loadNeve1073DirectoryIfPresent();
     reset();
 }
 
@@ -32,6 +34,7 @@ void MachineProcessor::reset()
 {
     limiter_.reset();
     namAdapter_.reset();
+    irAdapter_.reset();
     lastMeters_ = {};
 }
 
@@ -70,6 +73,7 @@ void MachineProcessor::process(const core::SessionState& session, AudioBlockView
             scratch[frame] = input[frame] * inGain;
 
         namAdapter_.processChannel(channelIndex, scratch.data(), frames);
+        irAdapter_.processChannel(channelIndex, channel.preampIndex, scratch.data(), frames);
 
         for (std::size_t frame = 0; frame < frames; ++frame)
         {

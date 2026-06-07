@@ -16,6 +16,7 @@ struct ChannelState
     bool armed = false;
     bool faderVisible = true;
     float inputGainDb = kDefaultInputGainDb;
+    int preampIndex = 5; // 0..10 stepped hidden 1073 IR selector; default = Neve 55.wav.
     float faderGainDb = kDefaultFaderGainDb;
     float pan = kDefaultPan; // -1.0 = left, 0.0 = center, +1.0 = right.
     float meterPeak = 0.0f;
@@ -31,6 +32,11 @@ struct ChannelState
     void setInputGainDb(float value)
     {
         inputGainDb = std::clamp(value, kInputGainMinDb, kInputGainMaxDb);
+    }
+
+    void setPreampIndex(int value)
+    {
+        preampIndex = std::clamp(value, 0, 10);
     }
 
     void setPan(float value)

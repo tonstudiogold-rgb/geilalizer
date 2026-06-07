@@ -47,6 +47,8 @@ target_sources(Geilalizer
         src/core/RenderEngine.h
         src/core/SessionState.h
         src/dsp/AudioBlock.h
+        src/dsp/HiddenIrAdapter.cpp
+        src/dsp/HiddenIrAdapter.h
         src/dsp/HiddenNamAdapter.h
         src/dsp/MachineProcessor.cpp
         src/dsp/MachineProcessor.h
@@ -79,3 +81,16 @@ if(APPLE)
         XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++20"
         XCODE_ATTRIBUTE_MACOSX_DEPLOYMENT_TARGET "12.0")
 endif()
+
+add_executable(CoreSmoke
+    tests/CoreSmoke.cpp
+    src/core/AudioEngine.cpp
+    src/core/RenderEngine.cpp
+    src/dsp/HiddenIrAdapter.cpp
+    src/dsp/MachineProcessor.cpp)
+
+target_include_directories(CoreSmoke PRIVATE src)
+target_compile_features(CoreSmoke PRIVATE cxx_std_20)
+
+enable_testing()
+add_test(NAME CoreSmoke COMMAND CoreSmoke)

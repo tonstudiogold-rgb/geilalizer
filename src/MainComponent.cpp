@@ -20,6 +20,15 @@ void styleRotary(juce::Slider& slider, double min, double max, double value, con
     slider.setTextValueSuffix(suffix);
 }
 
+void styleSteppedRotary(juce::Slider& slider, double min, double max, double value)
+{
+    slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 72, 20);
+    slider.setRange(min, max, 1.0);
+    slider.setValue(value, juce::dontSendNotification);
+    slider.setDoubleClickReturnValue(true, value);
+}
+
 void styleLinear(juce::Slider& slider, double min, double max, double value, const juce::String& suffix = {})
 {
     slider.setSliderStyle(juce::Slider::LinearVertical);
@@ -90,6 +99,37 @@ public:
         styleRotary(inputGain, -24.0, 24.0, 0.0, " dB");
         addAndMakeVisible(inputGain);
 
+        preampLabel.setText("Preamp", juce::dontSendNotification);
+        preampLabel.setJustificationType(juce::Justification::centred);
+        addAndMakeVisible(preampLabel);
+        styleSteppedRotary(preamp, 0.0, 10.0, 5.0);
+        preamp.textFromValueFunction = [] (double value)
+        {
+            static const char* labels[] = { "20", "30", "40", "45", "50", "55", "60", "65", "70", "75", "80" };
+            const auto indexToUse = juce::jlimit(0, 10, static_cast<int>(std::round(value)));
+            return juce::String("Neve ") + labels[indexToUse];
+        };
+        preamp.valueFromTextFunction = [] (const juce::String& textToParse)
+        {
+            const auto textValue = textToParse.retainCharacters("0123456789").getIntValue();
+            switch (textValue)
+            {
+                case 20: return 0.0;
+                case 30: return 1.0;
+                case 40: return 2.0;
+                case 45: return 3.0;
+                case 50: return 4.0;
+                case 55: return 5.0;
+                case 60: return 6.0;
+                case 65: return 7.0;
+                case 70: return 8.0;
+                case 75: return 9.0;
+                case 80: return 10.0;
+                default: return 5.0;
+            }
+        };
+        addAndMakeVisible(preamp);
+
         faderLabel.setText("Fader", juce::dontSendNotification);
         faderLabel.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(faderLabel);
@@ -154,10 +194,13 @@ public:
         armButton.setBounds(area.removeFromTop(26));
         area.removeFromTop(5);
         inputGainLabel.setBounds(area.removeFromTop(18));
-        inputGain.setBounds(area.removeFromTop(76));
+        inputGain.setBounds(area.removeFromTop(66));
+        area.removeFromTop(4);
+        preampLabel.setBounds(area.removeFromTop(18));
+        preamp.setBounds(area.removeFromTop(66));
         area.removeFromTop(4);
         faderLabel.setBounds(area.removeFromTop(18));
-        fader.setBounds(area.removeFromTop(176));
+        fader.setBounds(area.removeFromTop(112));
         area.removeFromTop(5);
         panLabel.setBounds(area.removeFromTop(18));
         pan.setBounds(area.removeFromTop(70));
@@ -175,6 +218,8 @@ private:
     juce::TextButton armButton { "ARM" };
     juce::Slider inputGain;
     juce::Label inputGainLabel;
+    juce::Slider preamp;
+    juce::Label preampLabel;
     juce::Slider fader;
     juce::Label faderLabel;
     juce::Slider pan;

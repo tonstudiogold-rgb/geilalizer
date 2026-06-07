@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioBlock.h"
+#include "HiddenIrAdapter.h"
 #include "HiddenNamAdapter.h"
 #include "SafetyLimiter.h"
 #include "../core/SessionState.h"
@@ -30,6 +31,7 @@ public:
     SafetyLimiter& safetyLimiter() { return limiter_; }
     const SafetyLimiter& safetyLimiter() const { return limiter_; }
     HiddenNamAdapter& namAdapter() { return namAdapter_; }
+    HiddenIrAdapter& irAdapter() { return irAdapter_; }
     const ProcessMeters& lastMeters() const { return lastMeters_; }
 
 private:
@@ -37,6 +39,7 @@ private:
     int maxBlockSize_ = 0;
     SafetyLimiter limiter_;
     HiddenNamAdapter namAdapter_;
+    HiddenIrAdapter irAdapter_;
     std::array<std::vector<float>, core::kMaxMonoChannels> channelScratch_;
     ProcessMeters lastMeters_;
 };
