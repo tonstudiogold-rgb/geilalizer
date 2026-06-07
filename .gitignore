@@ -1,0 +1,43 @@
+# Build output
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# JUCE/CMake FetchContent
+_deps/
+
+# macOS
+.DS_Store
+*.dSYM/
+*.app/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# IDEs/editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Binaries and generated audio
+*.a
+*.dylib
+*.so
+*.dll
+*.exe
+*.wav
+*.aiff
+*.aif
+*.flac
+*.mp3
+
+# Logs
+*.log
