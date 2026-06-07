@@ -22,6 +22,9 @@ void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
 {
     sampleRate_ = sampleRate > 0.0 ? sampleRate : 44100.0;
     maxBlockSize_ = std::max(0, maxBlockSize);
+    for (auto& scratch : channelScratch_)
+        scratch.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
+    namAdapter_.prepare(sampleRate_, maxBlockSize_);
     reset();
 }
 
@@ -54,14 +57,23 @@ void MachineProcessor::process(const core::SessionState& session, AudioBlockView
         const auto& channel = session.channels[channelIndex];
         const float inGain = dbToLinear(channel.inputGainDb);
         const float fader = dbToLinear(channel.faderGainDb);
-        const float leftPan = std::sqrt(0.5f * (1.0f - channel.pan));
-        const float rightPan = std::sqrt(0.5f * (1.0f + channel.pan));
+        const float pan = std::clamp(channel.pan, -1.0f, 1.0f);
+        const float leftPan = std::sqrt(0.5f * (1.0f - pan));
+        const float rightPan = std::sqrt(0.5f * (1.0f + pan));
 
         const std::size_t frames = std::min(block.numFrames, input.size());
+        auto& scratch = channelScratch_[channelIndex];
+        if (scratch.size() < frames)
+            scratch.resize(frames, 0.0f); // Non-realtime safety for tests/offline; prepare() prevents this in realtime.
+
+        for (std::size_t frame = 0; frame < frames; ++frame)
+            scratch[frame] = input[frame] * inGain;
+
+        namAdapter_.processChannel(channelIndex, scratch.data(), frames);
+
         for (std::size_t frame = 0; frame < frames; ++frame)
         {
-            float mono = input[frame] * inGain * fader;
-            namAdapter_.processMono(&mono, 1);
+            const float mono = scratch[frame] * fader;
             out[frame * 2] += mono * leftPan;
             out[frame * 2 + 1] += mono * rightPan;
         }

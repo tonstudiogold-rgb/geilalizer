@@ -5,6 +5,9 @@
 #include "SafetyLimiter.h"
 #include "../core/SessionState.h"
 
+#include <array>
+#include <vector>
+
 namespace geilalizer::dsp
 {
 
@@ -34,6 +37,7 @@ private:
     int maxBlockSize_ = 0;
     SafetyLimiter limiter_;
     HiddenNamAdapter namAdapter_;
+    std::array<std::vector<float>, core::kMaxMonoChannels> channelScratch_;
     ProcessMeters lastMeters_;
 };
 

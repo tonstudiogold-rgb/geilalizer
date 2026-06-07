@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -15,8 +16,14 @@ struct AudioBlockView
 
 inline void ensureStereoOutput(AudioBlockView& block)
 {
-    if (block.stereoOutput != nullptr)
-        block.stereoOutput->assign(block.numFrames * 2, 0.0f);
+    if (block.stereoOutput == nullptr)
+        return;
+
+    const auto requiredSamples = block.numFrames * 2;
+    if (block.stereoOutput->size() < requiredSamples)
+        block.stereoOutput->resize(requiredSamples, 0.0f); // Non-realtime fallback; realtime caller should preallocate.
+
+    std::fill(block.stereoOutput->begin(), block.stereoOutput->begin() + static_cast<std::ptrdiff_t>(requiredSamples), 0.0f);
 }
 
 } // namespace geilalizer::dsp
