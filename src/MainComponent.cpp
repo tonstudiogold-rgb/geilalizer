@@ -5,37 +5,121 @@
 
 namespace
 {
-const auto background = juce::Colour { 0xff151515 };
-const auto panel = juce::Colour { 0xff222222 };
-const auto panelDark = juce::Colour { 0xff1a1a1a };
+const auto background = juce::Colour { 0xff101010 };
+const auto panel = juce::Colour { 0xff202020 };
+const auto panelDark = juce::Colour { 0xff151515 };
+const auto panelEdge = juce::Colour { 0xff383838 };
 const auto accent = juce::Colour { 0xffffb347 };
+const auto red = juce::Colour { 0xffd71919 };
+const auto green = juce::Colour { 0xff35c925 };
 const auto text = juce::Colour { 0xffeeeeee };
+const auto muted = juce::Colour { 0xff9b9b9b };
 
-void styleRotary(juce::Slider& slider, double min, double max, double value, const juce::String& suffix = {})
+void drawPanel(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title = {})
 {
-    slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 20);
-    slider.setRange(min, max, 0.1);
-    slider.setValue(value, juce::dontSendNotification);
-    slider.setTextValueSuffix(suffix);
+    g.setGradientFill(juce::ColourGradient(panel.brighter(0.08f), area.getTopLeft().toFloat(),
+                                           panelDark, area.getBottomRight().toFloat(), false));
+    g.fillRoundedRectangle(area.toFloat(), 5.0f);
+    g.setColour(panelEdge);
+    g.drawRoundedRectangle(area.toFloat().reduced(0.5f), 5.0f, 1.0f);
+
+    if (title.isNotEmpty())
+    {
+        g.setColour(text.withAlpha(0.9f));
+        g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+        g.drawText(title.toUpperCase(), area.reduced(10, 6).removeFromTop(18), juce::Justification::centredLeft);
+    }
 }
 
-void styleSteppedRotary(juce::Slider& slider, double min, double max, double value)
+void drawLedMeter(juce::Graphics& g, juce::Rectangle<int> area, int lit = 9, bool stereo = false)
 {
-    slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 72, 20);
-    slider.setRange(min, max, 1.0);
-    slider.setValue(value, juce::dontSendNotification);
-    slider.setDoubleClickReturnValue(true, value);
+    const int columns = stereo ? 2 : 1;
+    const int gap = stereo ? 5 : 0;
+    const int colWidth = (area.getWidth() - gap) / columns;
+    for (int c = 0; c < columns; ++c)
+    {
+        auto col = area.withX(area.getX() + c * (colWidth + gap)).withWidth(colWidth);
+        const int segments = 14;
+        const int segGap = 2;
+        const int segH = juce::jmax(2, (col.getHeight() - (segments - 1) * segGap) / segments);
+        for (int i = 0; i < segments; ++i)
+        {
+            const int y = col.getBottom() - (i + 1) * segH - i * segGap;
+            auto colour = i > 11 ? juce::Colours::red : (i > 8 ? juce::Colours::yellow : juce::Colours::limegreen);
+            g.setColour(colour.withAlpha(i < lit ? 0.9f : 0.18f));
+            g.fillRoundedRectangle((float) col.getX(), (float) y, (float) col.getWidth(), (float) segH, 1.5f);
+        }
+    }
 }
 
-void styleLinear(juce::Slider& slider, double min, double max, double value, const juce::String& suffix = {})
+void drawTransportButton(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& label,
+                         juce::Colour colour = juce::Colour { 0xff303030 })
 {
-    slider.setSliderStyle(juce::Slider::LinearVertical);
-    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-    slider.setRange(min, max, 0.1);
-    slider.setValue(value, juce::dontSendNotification);
-    slider.setTextValueSuffix(suffix);
+    g.setGradientFill(juce::ColourGradient(colour.brighter(0.3f), area.getTopLeft().toFloat(),
+                                           colour.darker(0.5f), area.getBottomRight().toFloat(), false));
+    g.fillRoundedRectangle(area.toFloat(), 4.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.8f));
+    g.drawRoundedRectangle(area.toFloat().reduced(0.5f), 4.0f, 1.0f);
+    g.setColour(text);
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText(label, area, juce::Justification::centred);
+}
+
+void drawReel(juce::Graphics& g, juce::Rectangle<int> area, float rotation)
+{
+    auto b = area.toFloat();
+    const auto centre = b.getCentre();
+    const float radius = juce::jmin(b.getWidth(), b.getHeight()) * 0.48f;
+
+    g.setGradientFill(juce::ColourGradient(juce::Colour { 0xff777777 }, b.getTopLeft(),
+                                           juce::Colour { 0xff111111 }, b.getBottomRight(), true));
+    g.fillEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.6f));
+    g.drawEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f, 2.0f);
+
+    for (int i = 0; i < 6; ++i)
+    {
+        const float a = rotation + i * juce::MathConstants<float>::twoPi / 6.0f;
+        juce::Path slot;
+        slot.addRoundedRectangle(-radius * 0.10f, -radius * 0.70f, radius * 0.20f, radius * 0.48f, 8.0f);
+        slot.applyTransform(juce::AffineTransform::rotation(a).translated(centre));
+        g.setColour(juce::Colours::black.withAlpha(0.42f));
+        g.fillPath(slot);
+    }
+
+    g.setGradientFill(juce::ColourGradient(juce::Colour { 0xffdedede }, centre.translated(-18.0f, -18.0f),
+                                           juce::Colour { 0xff333333 }, centre.translated(18.0f, 18.0f), false));
+    g.fillEllipse(centre.x - radius * 0.18f, centre.y - radius * 0.18f, radius * 0.36f, radius * 0.36f);
+}
+
+void drawSignalBlock(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title,
+                     const juce::String& subtitle, bool highlight = false)
+{
+    g.setColour(highlight ? panel.brighter(0.18f) : panelDark.brighter(0.05f));
+    g.fillRoundedRectangle(area.toFloat(), 4.0f);
+    g.setColour(highlight ? accent.withAlpha(0.55f) : juce::Colours::white.withAlpha(0.15f));
+    g.drawRoundedRectangle(area.toFloat().reduced(0.5f), 4.0f, 1.0f);
+    g.setColour(text);
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText(title, area.reduced(6, 7).removeFromTop(17), juce::Justification::centred);
+    g.setColour(muted);
+    g.setFont(juce::FontOptions(9.5f));
+    g.drawFittedText(subtitle, area.reduced(7, 30), juce::Justification::centred, 2);
+}
+
+void drawArrow(juce::Graphics& g, juce::Rectangle<int> area)
+{
+    juce::Path p;
+    const float cx = (float) area.getCentreX();
+    const float cy = (float) area.getCentreY();
+    p.startNewSubPath((float) area.getX() + 3.0f, cy);
+    p.lineTo((float) area.getRight() - 7.0f, cy);
+    p.lineTo((float) area.getRight() - 12.0f, cy - 5.0f);
+    p.startNewSubPath((float) area.getRight() - 7.0f, cy);
+    p.lineTo((float) area.getRight() - 12.0f, cy + 5.0f);
+    g.setColour(muted.withAlpha(0.8f));
+    g.strokePath(p, juce::PathStrokeType(1.7f));
+    (void) cx;
 }
 } // namespace
 
@@ -46,28 +130,12 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        const auto bounds = getLocalBounds().toFloat();
-        g.setColour(juce::Colours::black.withAlpha(0.5f));
-        g.fillRoundedRectangle(bounds, 4.0f);
-        g.setColour(juce::Colours::white.withAlpha(0.18f));
-        g.drawRoundedRectangle(bounds.reduced(0.5f), 4.0f, 1.0f);
-
-        auto meterArea = getLocalBounds().reduced(6, 8);
-        const auto barCount = 8;
-        const auto gap = 3;
-        const auto barHeight = (meterArea.getHeight() - gap * (barCount - 1)) / barCount;
-        for (int i = 0; i < barCount; ++i)
-        {
-            const auto y = meterArea.getBottom() - (i + 1) * barHeight - i * gap;
-            const auto levelColour = i > 5 ? juce::Colours::red : (i > 3 ? juce::Colours::yellow : juce::Colours::limegreen);
-            g.setColour(levelColour.withAlpha(0.28f));
-            g.fillRoundedRectangle((float) meterArea.getX(), (float) y,
-                                   (float) meterArea.getWidth(), (float) barHeight, 2.0f);
-        }
-
-        g.setColour(text.withAlpha(0.75f));
-        g.setFont(12.0f);
-        g.drawFittedText(label, getLocalBounds().reduced(3), juce::Justification::centred, 2);
+        drawPanel(g, getLocalBounds(), {});
+        auto area = getLocalBounds().reduced(10, 12);
+        drawLedMeter(g, area.removeFromTop(area.getHeight() - 24), 11, label.containsIgnoreCase("master"));
+        g.setColour(text.withAlpha(0.8f));
+        g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+        g.drawText(label, area, juce::Justification::centred);
     }
 
 private:
@@ -78,154 +146,79 @@ class MainComponent::ChannelStrip final : public juce::Component,
                                          public juce::FileDragAndDropTarget
 {
 public:
-    explicit ChannelStrip(int channelIndex) : index(channelIndex), meter("Meter")
+    explicit ChannelStrip(int channelIndex) : index(channelIndex)
     {
-        numberName.setText(juce::String(index).paddedLeft('0', 2), juce::dontSendNotification);
-        numberName.setEditable(true, true, false);
-        numberName.setJustificationType(juce::Justification::centred);
-        numberName.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.35f));
-        numberName.setColour(juce::Label::textColourId, text);
-        numberName.setColour(juce::Label::outlineColourId, juce::Colours::white.withAlpha(0.2f));
-        addAndMakeVisible(numberName);
+        inputLabel.setText("INPUT", juce::dontSendNotification);
+        inputLabel.setJustificationType(juce::Justification::centred);
+        inputLabel.setColour(juce::Label::textColourId, text);
+        addAndMakeVisible(inputLabel);
 
         armButton.setClickingTogglesState(true);
-        armButton.setColour(juce::TextButton::buttonColourId, juce::Colours::darkred);
-        armButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red);
+        armButton.setButtonText("ARM");
+        armButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff540b0b });
+        armButton.setColour(juce::TextButton::buttonOnColourId, red);
+        armButton.setColour(juce::TextButton::textColourOffId, text);
         addAndMakeVisible(armButton);
 
-        inputGainLabel.setText("Input", juce::dontSendNotification);
-        inputGainLabel.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(inputGainLabel);
-        styleRotary(inputGain, -24.0, 24.0, 0.0, " dB");
+        inputGain.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        inputGain.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 17);
+        inputGain.setRange(-12.0, 12.0, 0.1);
+        inputGain.setValue((channelIndex % 7 - 3) * 0.7, juce::dontSendNotification);
+        inputGain.setTextValueSuffix(" dB");
         addAndMakeVisible(inputGain);
-
-        preampLabel.setText("Preamp", juce::dontSendNotification);
-        preampLabel.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(preampLabel);
-        styleSteppedRotary(preamp, 0.0, 10.0, 5.0);
-        preamp.textFromValueFunction = [] (double value)
-        {
-            static const char* labels[] = { "20", "30", "40", "45", "50", "55", "60", "65", "70", "75", "80" };
-            const auto indexToUse = juce::jlimit(0, 10, static_cast<int>(std::round(value)));
-            return juce::String("Neve ") + labels[indexToUse];
-        };
-        preamp.valueFromTextFunction = [] (const juce::String& textToParse)
-        {
-            const auto textValue = textToParse.retainCharacters("0123456789").getIntValue();
-            switch (textValue)
-            {
-                case 20: return 0.0;
-                case 30: return 1.0;
-                case 40: return 2.0;
-                case 45: return 3.0;
-                case 50: return 4.0;
-                case 55: return 5.0;
-                case 60: return 6.0;
-                case 65: return 7.0;
-                case 70: return 8.0;
-                case 75: return 9.0;
-                case 80: return 10.0;
-                default: return 5.0;
-            }
-        };
-        addAndMakeVisible(preamp);
-
-        faderLabel.setText("Fader", juce::dontSendNotification);
-        faderLabel.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(faderLabel);
-        styleLinear(fader, -60.0, 12.0, 0.0, " dB");
-        fader.setDoubleClickReturnValue(true, 0.0);
-        addAndMakeVisible(fader);
-
-        panLabel.setText("Pan", juce::dontSendNotification);
-        panLabel.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(panLabel);
-        styleRotary(pan, -100.0, 100.0, 0.0);
-        pan.textFromValueFunction = [] (double value)
-        {
-            if (std::abs(value) < 0.05)
-                return juce::String("C");
-            return juce::String(std::abs(value), 0) + (value < 0.0 ? " L" : " R");
-        };
-        addAndMakeVisible(pan);
-
-        addAndMakeVisible(meter);
-
-        loadDropButton.setButtonText("Load / Drop");
-        addAndMakeVisible(loadDropButton);
     }
 
     bool isInterestedInFileDrag(const juce::StringArray&) override { return true; }
-
-    void fileDragEnter(const juce::StringArray&, int, int) override
-    {
-        dragging = true;
-        repaint();
-    }
-
-    void fileDragExit(const juce::StringArray&) override
-    {
-        dragging = false;
-        repaint();
-    }
-
+    void fileDragEnter(const juce::StringArray&, int, int) override { dragging = true; repaint(); }
+    void fileDragExit(const juce::StringArray&) override { dragging = false; repaint(); }
     void filesDropped(const juce::StringArray& files, int, int) override
     {
         dragging = false;
-        if (! files.isEmpty())
-            loadDropButton.setButtonText("Loaded");
+        loaded = ! files.isEmpty();
         repaint();
     }
 
     void paint(juce::Graphics& g) override
     {
-        const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
-        g.setColour(dragging ? panel.brighter(0.22f) : panel);
-        g.fillRoundedRectangle(bounds, 6.0f);
-        g.setColour(dragging ? accent : juce::Colours::white.withAlpha(0.12f));
-        g.drawRoundedRectangle(bounds, 6.0f, dragging ? 2.0f : 1.0f);
+        auto area = getLocalBounds();
+        drawPanel(g, area, {});
+
+        g.setColour(text);
+        g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+        g.drawText(juce::String(index), area.removeFromTop(20), juce::Justification::centred);
+
+        auto meterArea = juce::Rectangle<int>(7, 30, 13, 94);
+        drawLedMeter(g, meterArea, loaded ? 12 : (6 + index % 6), false);
+
+        g.setColour(muted);
+        g.setFont(juce::FontOptions(9.0f));
+        g.drawText("PEAK", 24, 31, getWidth() - 28, 14, juce::Justification::centred);
+        g.setColour(loaded ? green : red.withAlpha(0.45f));
+        g.fillEllipse(31.0f, 50.0f, 5.0f, 5.0f);
+
+        if (dragging)
+        {
+            g.setColour(accent.withAlpha(0.22f));
+            g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f);
+            g.setColour(accent);
+            g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f, 2.0f);
+        }
     }
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced(7, 8);
-        numberName.setBounds(area.removeFromTop(26));
-        area.removeFromTop(5);
-        armButton.setBounds(area.removeFromTop(26));
-        area.removeFromTop(5);
-        inputGainLabel.setBounds(area.removeFromTop(18));
-        inputGain.setBounds(area.removeFromTop(66));
-        area.removeFromTop(4);
-        preampLabel.setBounds(area.removeFromTop(18));
-        preamp.setBounds(area.removeFromTop(66));
-        area.removeFromTop(4);
-        faderLabel.setBounds(area.removeFromTop(18));
-        fader.setBounds(area.removeFromTop(112));
-        area.removeFromTop(5);
-        panLabel.setBounds(area.removeFromTop(18));
-        pan.setBounds(area.removeFromTop(70));
-        area.removeFromTop(6);
-        meter.setBounds(area.removeFromTop(86));
-        area.removeFromTop(7);
-        loadDropButton.setBounds(area.removeFromTop(30));
+        inputLabel.setBounds(22, 64, getWidth() - 26, 16);
+        inputGain.setBounds(20, 80, getWidth() - 24, 58);
+        armButton.setBounds(20, getHeight() - 31, getWidth() - 34, 22);
     }
 
 private:
     int index = 0;
     bool dragging = false;
-
-    juce::Label numberName;
-    juce::TextButton armButton { "ARM" };
+    bool loaded = false;
+    juce::Label inputLabel;
     juce::Slider inputGain;
-    juce::Label inputGainLabel;
-    juce::Slider preamp;
-    juce::Label preampLabel;
-    juce::Slider fader;
-    juce::Label faderLabel;
-    juce::Slider pan;
-    juce::Label panLabel;
-    MeterPlaceholder meter;
-    juce::TextButton loadDropButton;
+    juce::TextButton armButton;
 };
 
 class MainComponent::ExportSettingsComponent final : public juce::Component
@@ -233,126 +226,72 @@ class MainComponent::ExportSettingsComponent final : public juce::Component
 public:
     ExportSettingsComponent()
     {
-        heading.setText("Export WAV", juce::dontSendNotification);
+        heading.setText("Render / Export", juce::dontSendNotification);
         heading.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-        heading.setJustificationType(juce::Justification::centredLeft);
+        heading.setColour(juce::Label::textColourId, text);
         addAndMakeVisible(heading);
 
-        recordingLength.setText("Recording length: 00:00 (no audio loaded)", juce::dontSendNotification);
-        addAndMakeVisible(recordingLength);
-
-        fullRange.setButtonText("Full export");
-        fullRange.setRadioGroupId(1);
-        fullRange.setToggleState(true, juce::dontSendNotification);
-        customRange.setButtonText("Custom range");
-        customRange.setRadioGroupId(1);
-        addAndMakeVisible(fullRange);
-        addAndMakeVisible(customRange);
-
-        addField(fromMin, "0");
-        addField(fromSec, "0");
-        addField(toMin, "0");
-        addField(toSec, "0");
-
-        sampleRate.addItem("44.1 kHz", 1);
-        sampleRate.addItem("48 kHz", 2);
-        sampleRate.setSelectedId(1);
-        bitDepth.addItem("16 bit", 1);
-        bitDepth.addItem("24 bit", 2);
-        bitDepth.setSelectedId(2);
-        addAndMakeVisible(sampleRate);
-        addAndMakeVisible(bitDepth);
-
-        exportButton.setButtonText("Export");
-        cancelButton.setButtonText("Cancel");
-        cancelButton.onClick = [this]
+        for (auto* label : { &format, &resolution, &speed })
         {
-            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
-                dw->exitModalState(0);
-        };
+            label->setColour(juce::Label::textColourId, text);
+            addAndMakeVisible(label);
+        }
+        format.setText("Format: WAV", juce::dontSendNotification);
+        resolution.setText("Resolution: 24 Bit", juce::dontSendNotification);
+        speed.setText("Tape speed: 15 IPS", juce::dontSendNotification);
+
+        exportButton.setButtonText("RENDER");
         exportButton.onClick = [this]
         {
             if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
                 dw->exitModalState(1);
         };
         addAndMakeVisible(exportButton);
-        addAndMakeVisible(cancelButton);
-
-        setSize(430, 310);
+        setSize(410, 230);
     }
 
-    void paint(juce::Graphics& g) override
-    {
-        g.fillAll(panelDark);
-        g.setColour(text);
-        g.setFont(14.0f);
-        g.drawText("From", 24, 130, 70, 24, juce::Justification::centredLeft);
-        g.drawText("To", 24, 166, 70, 24, juce::Justification::centredLeft);
-        g.drawText("min", 165, 130, 38, 24, juce::Justification::centredLeft);
-        g.drawText("sec", 270, 130, 38, 24, juce::Justification::centredLeft);
-        g.drawText("min", 165, 166, 38, 24, juce::Justification::centredLeft);
-        g.drawText("sec", 270, 166, 38, 24, juce::Justification::centredLeft);
-    }
+    void paint(juce::Graphics& g) override { drawPanel(g, getLocalBounds(), {}); }
 
     void resized() override
     {
         auto area = getLocalBounds().reduced(24, 18);
-        heading.setBounds(area.removeFromTop(32));
-        recordingLength.setBounds(area.removeFromTop(28));
-        area.removeFromTop(6);
-        fullRange.setBounds(area.removeFromTop(26));
-        customRange.setBounds(area.removeFromTop(26));
-
-        fromMin.setBounds(96, 130, 62, 24);
-        fromSec.setBounds(205, 130, 62, 24);
-        toMin.setBounds(96, 166, 62, 24);
-        toSec.setBounds(205, 166, 62, 24);
-        sampleRate.setBounds(296, 130, 110, 26);
-        bitDepth.setBounds(296, 166, 110, 26);
-        exportButton.setBounds(218, 252, 88, 30);
-        cancelButton.setBounds(318, 252, 88, 30);
+        heading.setBounds(area.removeFromTop(36));
+        format.setBounds(area.removeFromTop(28));
+        resolution.setBounds(area.removeFromTop(28));
+        speed.setBounds(area.removeFromTop(28));
+        area.removeFromTop(22);
+        exportButton.setBounds(area.removeFromTop(34).withSizeKeepingCentre(130, 34));
     }
 
 private:
-    void addField(juce::TextEditor& editor, const juce::String& textToShow)
-    {
-        editor.setInputRestrictions(2, "0123456789");
-        editor.setText(textToShow);
-        addAndMakeVisible(editor);
-    }
-
-    juce::Label heading;
-    juce::Label recordingLength;
-    juce::ToggleButton fullRange;
-    juce::ToggleButton customRange;
-    juce::TextEditor fromMin;
-    juce::TextEditor fromSec;
-    juce::TextEditor toMin;
-    juce::TextEditor toSec;
-    juce::ComboBox sampleRate;
-    juce::ComboBox bitDepth;
+    juce::Label heading, format, resolution, speed;
     juce::TextButton exportButton;
-    juce::TextButton cancelButton;
 };
 
 MainComponent::MainComponent()
 {
     setOpaque(true);
-    setSize(1400, 820);
+    setSize(1280, 1180);
 
-    titleLabel.setText("24-Track Standalone Geilalizer", juce::dontSendNotification);
-    titleLabel.setFont(juce::FontOptions(30.0f, juce::Font::bold));
+    titleLabel.setText("24-SPUR STANDALONE GEILALIZER – BANDMASCHINE", juce::dontSendNotification);
+    titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
     titleLabel.setJustificationType(juce::Justification::centredLeft);
     titleLabel.setColour(juce::Label::textColourId, text);
     addAndMakeVisible(titleLabel);
 
+    loadButton.setButtonText("REW");
+    stopButton.setButtonText("STOP");
+    playButton.setButtonText("PLAY");
+    exportButton.setButtonText("RENDER");
+    playButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff116b12 });
+    exportButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff5b5b5b });
     for (auto* button : { &loadButton, &playButton, &stopButton, &exportButton })
         addAndMakeVisible(button);
-
     exportButton.onClick = [this] { showExportDialog(); };
 
     channelViewport.setViewedComponent(&channelContainer, false);
     channelViewport.setScrollBarsShown(false, true);
+    channelViewport.setScrollOnDragMode(juce::Viewport::ScrollOnDragMode::all);
     addAndMakeVisible(channelViewport);
 
     for (int i = 1; i <= channelCount; ++i)
@@ -362,83 +301,237 @@ MainComponent::MainComponent()
     }
 
     addAndMakeVisible(masterGroup);
+    masterGroup.setText("MASTER");
+    masterGroup.setColour(juce::GroupComponent::textColourId, text);
+
+    limiterToggle.setButtonText("LIMITER ON");
     limiterToggle.setToggleState(true, juce::dontSendNotification);
+    limiterToggle.setColour(juce::ToggleButton::textColourId, text);
     addAndMakeVisible(limiterToggle);
 
-    outputTrimLabel.setText("Output Trim", juce::dontSendNotification);
+    outputTrimLabel.setText("OUTPUT", juce::dontSendNotification);
     outputTrimLabel.setJustificationType(juce::Justification::centred);
+    outputTrimLabel.setColour(juce::Label::textColourId, text);
     addAndMakeVisible(outputTrimLabel);
-    styleRotary(outputTrim, -12.0, 12.0, 0.0, " dB");
+    outputTrim.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    outputTrim.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 20);
+    outputTrim.setRange(-12.0, 12.0, 0.1);
+    outputTrim.setValue(0.0, juce::dontSendNotification);
+    outputTrim.setTextValueSuffix(" dB");
     addAndMakeVisible(outputTrim);
 
-    masterMeter = std::make_unique<MeterPlaceholder>("Master Meter");
+    masterMeter = std::make_unique<MeterPlaceholder>("L / R");
     addAndMakeVisible(*masterMeter);
 
-    limiterActivityLabel.setText("Limiter Activity: idle", juce::dontSendNotification);
+    limiterActivityLabel.setText("MONITOR: STEREO  |  15 IPS", juce::dontSendNotification);
     limiterActivityLabel.setJustificationType(juce::Justification::centred);
     limiterActivityLabel.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.35f));
     limiterActivityLabel.setColour(juce::Label::textColourId, accent);
     addAndMakeVisible(limiterActivityLabel);
 
-    getLookAndFeel().setColour(juce::Slider::thumbColourId, accent);
-    getLookAndFeel().setColour(juce::Slider::rotarySliderFillColourId, accent);
-    getLookAndFeel().setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff333333 });
-    getLookAndFeel().setColour(juce::TextButton::textColourOffId, text);
-    getLookAndFeel().setColour(juce::Label::textColourId, text);
+    auto& lf = getLookAndFeel();
+    lf.setColour(juce::Slider::thumbColourId, juce::Colour { 0xffd9d9d9 });
+    lf.setColour(juce::Slider::rotarySliderFillColourId, red);
+    lf.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour { 0xff454545 });
+    lf.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff303030 });
+    lf.setColour(juce::TextButton::textColourOffId, text);
+    lf.setColour(juce::Label::textColourId, text);
 }
 
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(background);
-    g.setColour(accent);
-    g.drawHorizontalLine(64, 20.0f, (float) getWidth() - 20.0f);
+
+    auto bounds = getLocalBounds().reduced(16);
+    auto header = bounds.removeFromTop(32);
+    (void) header;
+
+    auto deck = bounds.removeFromTop(205);
+    drawPanel(g, deck, "ÜBERSICHT");
+    auto deckInner = deck.reduced(18, 26);
+    drawReel(g, deckInner.removeFromLeft(315).reduced(6, 2), 0.35f);
+    drawReel(g, deckInner.removeFromRight(315).reduced(6, 2), -0.22f);
+
+    auto transportPanel = deck.withSizeKeepingCentre(360, 104).translated(0, -12);
+    drawPanel(g, transportPanel, {});
+    auto t = transportPanel.reduced(14, 10);
+    g.setColour(muted);
+    g.setFont(juce::FontOptions(9.0f));
+    g.drawText("PROJECT", t.removeFromTop(16).removeFromLeft(75), juce::Justification::centredLeft);
+    g.setColour(juce::Colours::black);
+    auto projectBox = juce::Rectangle<int>(transportPanel.getX() + 98, transportPanel.getY() + 11, 210, 18);
+    g.fillRect(projectBox);
+    g.setColour(text);
+    g.setFont(juce::FontOptions(10.0f));
+    g.drawText("My Mix – Geilalizer Session", projectBox.reduced(5, 0), juce::Justification::centred);
+    g.setFont(juce::FontOptions(17.0f, juce::Font::bold));
+    g.drawText("01:02:15:12", transportPanel.getX() + 108, transportPanel.getY() + 39, 140, 24, juce::Justification::centred);
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    g.drawText("15 IPS", transportPanel.getRight() - 72, transportPanel.getY() + 42, 50, 18, juce::Justification::centred);
+
+    auto btnRow = juce::Rectangle<int>(transportPanel.getX() + 29, transportPanel.getBottom() - 36, 302, 26);
+    drawTransportButton(g, btnRow.removeFromLeft(48), "REW"); btnRow.removeFromLeft(7);
+    drawTransportButton(g, btnRow.removeFromLeft(48), "FFWD"); btnRow.removeFromLeft(7);
+    drawTransportButton(g, btnRow.removeFromLeft(48), "STOP"); btnRow.removeFromLeft(7);
+    drawTransportButton(g, btnRow.removeFromLeft(48), "PLAY", juce::Colour { 0xff128111 }); btnRow.removeFromLeft(7);
+    drawTransportButton(g, btnRow.removeFromLeft(48), "REC", red.darker(0.2f));
+
+    auto machine = juce::Rectangle<int>(deck.getCentreX() - 170, deck.getBottom() - 70, 340, 54);
+    g.setGradientFill(juce::ColourGradient(juce::Colour { 0xff9d9284 }, machine.getTopLeft().toFloat(),
+                                           juce::Colour { 0xff3f3933 }, machine.getBottomRight().toFloat(), false));
+    g.fillRoundedRectangle(machine.toFloat(), 8.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.7f));
+    g.drawRoundedRectangle(machine.toFloat(), 8.0f, 2.0f);
+    g.setColour(text);
+    g.setFont(juce::FontOptions(25.0f, juce::Font::bold));
+    g.drawText("GEILALIZER", machine, juce::Justification::centred);
+    g.setFont(juce::FontOptions(9.0f));
+    g.drawText("24 TRACK TAPE MACHINE", machine.withTrimmedTop(32), juce::Justification::centred);
+
+    auto bandY = deck.getY() + 134;
+    g.setColour(juce::Colour { 0xff6b4028 });
+    g.drawLine((float) deck.getX() + 210.0f, (float) bandY, (float) machine.getX(), (float) bandY + 20.0f, 7.0f);
+    g.drawLine((float) machine.getRight(), (float) bandY + 20.0f, (float) deck.getRight() - 210.0f, (float) bandY, 7.0f);
+
+    auto channelArea = bounds.removeFromTop(392);
+    drawPanel(g, channelArea, "24-SPUR KANÄLE");
+
+    auto masterTextArea = channelArea.removeFromRight(116).reduced(10, 34);
+    g.setColour(text);
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText("MASTER", masterTextArea.removeFromTop(18), juce::Justification::centred);
+    g.setFont(juce::FontOptions(9.0f));
+    g.drawText("OUTPUT / MONITOR", masterTextArea.removeFromBottom(18), juce::Justification::centred);
+
+    bounds.removeFromTop(10);
+    auto perChannel = bounds.removeFromTop(128);
+    drawPanel(g, perChannel, "KANAL STRUKTUR (PRO KANAL)");
+    auto flow = perChannel.reduced(18, 34);
+    const juce::StringArray channelTitles { "AUDIO FILE", "INPUT", "NAM 1", "NAM 2", "NAM 3", "FADER", "CHANNEL OUT" };
+    const juce::StringArray channelSubs { "Drag / Drop WAV", "Gain staging", "PRE / INPUT AMP", "CHANNEL / LINE", "HEAD / TAPE RESPONSE", "Post-tape level", "24 → Mixbus" };
+    for (int i = 0; i < channelTitles.size(); ++i)
+    {
+        auto block = flow.removeFromLeft(i == 5 ? 72 : 136);
+        drawSignalBlock(g, block, channelTitles[i], channelSubs[i], i >= 2 && i <= 4);
+        if (i != channelTitles.size() - 1)
+            drawArrow(g, flow.removeFromLeft(28));
+    }
+
+    bounds.removeFromTop(10);
+    auto mixbus = bounds.removeFromTop(128);
+    drawPanel(g, mixbus, "MIXBUS ARCHITEKTUR");
+    auto mixFlow = mixbus.reduced(18, 34);
+    const juce::StringArray mixTitles { "CHANNEL OUTPUTS", "MIXBUS SUMMING", "NAM 4", "NAM 5", "NAM 6", "NAM 7", "MASTER OUTPUT" };
+    const juce::StringArray mixSubs { "1–24", "Analog summing", "MIXBUS / FARBE", "TAPE", "LIMIT", "CONVERTER", "L / R" };
+    for (int i = 0; i < mixTitles.size(); ++i)
+    {
+        auto block = mixFlow.removeFromLeft(i == 0 ? 140 : 130);
+        drawSignalBlock(g, block, mixTitles[i], mixSubs[i], i >= 2 && i <= 5);
+        if (i != mixTitles.size() - 1)
+            drawArrow(g, mixFlow.removeFromLeft(24));
+    }
+
+    bounds.removeFromTop(10);
+    auto bottom = bounds.removeFromTop(150);
+    drawPanel(g, bottom, "HAUPTSTEUERUNG & RENDER");
+    auto b = bottom.reduced(18, 34);
+    auto transport = b.removeFromLeft(320);
+    drawPanel(g, transport, "TRANSPORT");
+    auto tr = transport.reduced(14, 38);
+    drawTransportButton(g, tr.removeFromLeft(54), "<<"); tr.removeFromLeft(8);
+    drawTransportButton(g, tr.removeFromLeft(54), ">>"); tr.removeFromLeft(8);
+    drawTransportButton(g, tr.removeFromLeft(54), "STOP"); tr.removeFromLeft(8);
+    drawTransportButton(g, tr.removeFromLeft(54), "PLAY", juce::Colour { 0xff128111 }); tr.removeFromLeft(8);
+    drawTransportButton(g, tr.removeFromLeft(54), "REC", red.darker(0.2f));
+
+    b.removeFromLeft(18);
+    auto time = b.removeFromLeft(170);
+    drawPanel(g, time, "TIME / POSITION");
+    g.setColour(text);
+    g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
+    g.drawText("01:02:15:12", time.reduced(14, 46), juce::Justification::centred);
+
+    b.removeFromLeft(18);
+    auto project = b.removeFromLeft(230);
+    drawPanel(g, project, "PROJECT");
+    g.setColour(text);
+    g.setFont(juce::FontOptions(11.0f));
+    g.drawText("My Mix – Geilalizer Session", project.reduced(14, 45), juce::Justification::centred);
+    g.drawText("48.0 kHz  |  24 Bit  |  15 IPS", project.reduced(14, 70), juce::Justification::centred);
+
+    b.removeFromLeft(18);
+    auto render = b.removeFromLeft(200);
+    drawPanel(g, render, "RENDER / EXPORT");
+    g.setColour(text);
+    g.setFont(juce::FontOptions(11.0f));
+    g.drawText("FORMAT   WAV", render.reduced(14, 40).removeFromTop(22), juce::Justification::centredLeft);
+    g.drawText("RESOLUTION   24 Bit", render.reduced(14, 62).removeFromTop(22), juce::Justification::centredLeft);
+    drawTransportButton(g, render.withSizeKeepingCentre(120, 30).translated(0, 35), "RENDER", juce::Colour { 0xff5b5b5b });
+
+    b.removeFromLeft(18);
+    drawPanel(g, b, "OUTPUT METERS");
+    drawLedMeter(g, b.reduced(35, 34), 12, true);
+
+    auto footer = bounds.removeFromTop(76);
+    drawPanel(g, footer, {});
+    g.setColour(text.withAlpha(0.85f));
+    g.setFont(juce::FontOptions(11.0f));
+    g.drawText("NAM-Modelle sind fest eingebaut und werden beim Start geladen. Alle Fader arbeiten Post-Processing. Limiter-Station kann ein/aus geschaltet werden.",
+               footer.reduced(18), juce::Justification::centredLeft);
+    g.setFont(juce::FontOptions(27.0f, juce::Font::bold));
+    g.drawText("GEILALIZER", footer.removeFromRight(250), juce::Justification::centred);
 }
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(18);
-    auto header = area.removeFromTop(48);
-    titleLabel.setBounds(header.removeFromLeft(360));
+    auto bounds = getLocalBounds().reduced(16);
+    auto title = bounds.removeFromTop(32);
+    titleLabel.setBounds(title.removeFromLeft(650));
 
-    auto transport = header.removeFromRight(420);
-    loadButton.setBounds(transport.removeFromLeft(92).reduced(4));
-    playButton.setBounds(transport.removeFromLeft(92).reduced(4));
-    stopButton.setBounds(transport.removeFromLeft(92).reduced(4));
-    exportButton.setBounds(transport.removeFromLeft(110).reduced(4));
+    bounds.removeFromTop(205);
+    auto channelPanel = bounds.removeFromTop(392).reduced(16, 30);
+    auto masterArea = channelPanel.removeFromRight(122);
+    channelPanel.removeFromRight(8);
 
-    area.removeFromTop(12);
-    auto masterArea = area.removeFromRight(210);
-    area.removeFromRight(14);
-    channelViewport.setBounds(area);
-
-    constexpr int stripWidth = 92;
-    constexpr int stripGap = 8;
-    const int stripHeight = juce::jmax(570, area.getHeight() - 18);
-    channelContainer.setBounds(0, 0, channelCount * (stripWidth + stripGap) + stripGap, stripHeight);
-    auto channelArea = channelContainer.getLocalBounds().reduced(stripGap, 0);
-    for (auto* strip : channels)
+    channelViewport.setBounds(channelPanel);
+    constexpr int stripWidth = 76;
+    constexpr int stripHeight = 158;
+    constexpr int stripGap = 7;
+    const int rowGap = 8;
+    const int cols = 12;
+    channelContainer.setBounds(0, 0, cols * (stripWidth + stripGap) + stripGap, stripHeight * 2 + rowGap + 2);
+    for (int i = 0; i < channels.size(); ++i)
     {
-        strip->setBounds(channelArea.removeFromLeft(stripWidth).withTrimmedBottom(4));
-        channelArea.removeFromLeft(stripGap);
+        const int row = i / cols;
+        const int col = i % cols;
+        channels[i]->setBounds(stripGap + col * (stripWidth + stripGap), row * (stripHeight + rowGap), stripWidth, stripHeight);
     }
 
     masterGroup.setBounds(masterArea);
-    auto m = masterArea.reduced(18, 34);
-    limiterToggle.setBounds(m.removeFromTop(30));
-    m.removeFromTop(14);
-    outputTrimLabel.setBounds(m.removeFromTop(22));
-    outputTrim.setBounds(m.removeFromTop(110));
-    m.removeFromTop(18);
+    auto m = masterArea.reduced(12, 26);
     if (masterMeter != nullptr)
-        masterMeter->setBounds(m.removeFromTop(230));
-    m.removeFromTop(18);
-    limiterActivityLabel.setBounds(m.removeFromTop(36));
+        masterMeter->setBounds(m.removeFromTop(155));
+    m.removeFromTop(8);
+    outputTrimLabel.setBounds(m.removeFromTop(18));
+    outputTrim.setBounds(m.removeFromTop(82));
+    m.removeFromTop(8);
+    limiterToggle.setBounds(m.removeFromTop(24));
+    limiterActivityLabel.setBounds(m.removeFromTop(42));
+
+    auto deckArea = juce::Rectangle<int>(getWidth() / 2 - 150, 92, 300, 28);
+    loadButton.setBounds(deckArea.removeFromLeft(55));
+    deckArea.removeFromLeft(6);
+    stopButton.setBounds(deckArea.removeFromLeft(55));
+    deckArea.removeFromLeft(6);
+    playButton.setBounds(deckArea.removeFromLeft(55));
+    deckArea.removeFromLeft(6);
+    exportButton.setBounds(deckArea.removeFromLeft(78));
 }
 
 void MainComponent::showExportDialog()
 {
     juce::DialogWindow::LaunchOptions options;
-    options.dialogTitle = "Export";
+    options.dialogTitle = "Render / Export";
     options.dialogBackgroundColour = panelDark;
     options.content.setOwned(new ExportSettingsComponent());
     options.escapeKeyTriggersCloseButton = true;
