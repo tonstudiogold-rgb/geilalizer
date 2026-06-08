@@ -20,7 +20,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGEILALIZER_ENABLE_NAMCORE=ON
 
       - name: Build app and smoke tests
-        run: cmake --build build --config Release --parallel --target Geilalizer CoreSmoke NamAdapterSmoke ProductE2E
+        run: cmake --build build --config Release --parallel --target Geilalizer CoreSmoke NamAdapterSmoke ProductE2E FunctionalSmoke
 
       - name: Run smoke tests
         run: ctest --test-dir build --output-on-failure -C Release
