@@ -167,6 +167,17 @@ add_executable(FunctionalSmoke
     src/dsp/HiddenPostFaderIrAdapter.cpp
     src/dsp/MachineProcessor.cpp)
 
+if(GEILALIZER_BUILD_JUCE_APP)
+    add_executable(OfflineRenderSlice
+        tests/OfflineRenderSlice.cpp
+        src/core/RenderEngine.cpp
+        src/dsp/HiddenIrAdapter.cpp
+        src/dsp/HiddenMixbusIrAdapter.cpp
+        src/dsp/HiddenNamAdapter.cpp
+        src/dsp/HiddenPostFaderIrAdapter.cpp
+        src/dsp/MachineProcessor.cpp)
+endif()
+
 target_include_directories(CoreSmoke PRIVATE src)
 target_compile_features(CoreSmoke PRIVATE cxx_std_20)
 target_include_directories(NamAdapterSmoke PRIVATE src)
@@ -175,6 +186,18 @@ target_include_directories(ProductE2E PRIVATE src)
 target_compile_features(ProductE2E PRIVATE cxx_std_20)
 target_include_directories(FunctionalSmoke PRIVATE src)
 target_compile_features(FunctionalSmoke PRIVATE cxx_std_20)
+if(GEILALIZER_BUILD_JUCE_APP)
+    target_include_directories(OfflineRenderSlice PRIVATE src)
+    target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
+    target_compile_definitions(OfflineRenderSlice PRIVATE JUCE_USE_CURL=0)
+    target_link_libraries(OfflineRenderSlice
+        PRIVATE
+            juce::juce_audio_basics
+            juce::juce_audio_formats
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+endif()
 
 if(GEILALIZER_ENABLE_NAMCORE)
     # NeuralAmpModelerCore registers architecture parsers from translation-unit static
@@ -192,6 +215,10 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_link_libraries(NamAdapterSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(ProductE2E PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(FunctionalSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
+    if(GEILALIZER_BUILD_JUCE_APP)
+        target_link_libraries(OfflineRenderSlice PRIVATE ${GEILALIZER_NAMCORE_LINK})
+        target_compile_definitions(OfflineRenderSlice PRIVATE GEILALIZER_USE_NAMCORE)
+    endif()
     target_compile_definitions(CoreSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(NamAdapterSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(ProductE2E PRIVATE GEILALIZER_USE_NAMCORE)
@@ -203,9 +230,17 @@ add_test(NAME CoreSmoke COMMAND CoreSmoke)
 add_test(NAME NamAdapterSmoke COMMAND NamAdapterSmoke)
 add_test(NAME ProductE2E COMMAND ProductE2E)
 add_test(NAME FunctionalSmoke COMMAND FunctionalSmoke)
+if(GEILALIZER_BUILD_JUCE_APP)
+    add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
+endif()
 set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
+if(GEILALIZER_BUILD_JUCE_APP)
+    set_tests_properties(OfflineRenderSlice PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
+endif()
 set_tests_properties(NamAdapterSmoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
