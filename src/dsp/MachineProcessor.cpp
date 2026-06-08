@@ -201,6 +201,7 @@ void MachineProcessor::process(const core::SessionState& session, AudioBlockView
         for (std::size_t frame = 0; frame < frames; ++frame)
         {
             const float mono = scratch[frame];
+            updatePeak(lastMeters_.channelPeaks[channelIndex], mono);
             out[frame * 2] += mono * leftPan;
             out[frame * 2 + 1] += mono * rightPan;
         }

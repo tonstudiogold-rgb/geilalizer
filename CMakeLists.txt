@@ -157,12 +157,24 @@ add_executable(ProductE2E
     src/dsp/HiddenPostFaderIrAdapter.cpp
     src/dsp/MachineProcessor.cpp)
 
+add_executable(FunctionalSmoke
+    tests/FunctionalSmoke.cpp
+    src/core/AudioEngine.cpp
+    src/core/RenderEngine.cpp
+    src/dsp/HiddenIrAdapter.cpp
+    src/dsp/HiddenMixbusIrAdapter.cpp
+    src/dsp/HiddenNamAdapter.cpp
+    src/dsp/HiddenPostFaderIrAdapter.cpp
+    src/dsp/MachineProcessor.cpp)
+
 target_include_directories(CoreSmoke PRIVATE src)
 target_compile_features(CoreSmoke PRIVATE cxx_std_20)
 target_include_directories(NamAdapterSmoke PRIVATE src)
 target_compile_features(NamAdapterSmoke PRIVATE cxx_std_20)
 target_include_directories(ProductE2E PRIVATE src)
 target_compile_features(ProductE2E PRIVATE cxx_std_20)
+target_include_directories(FunctionalSmoke PRIVATE src)
+target_compile_features(FunctionalSmoke PRIVATE cxx_std_20)
 
 if(GEILALIZER_ENABLE_NAMCORE)
     # NeuralAmpModelerCore registers architecture parsers from translation-unit static
@@ -179,17 +191,21 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_link_libraries(CoreSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(NamAdapterSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(ProductE2E PRIVATE ${GEILALIZER_NAMCORE_LINK})
+    target_link_libraries(FunctionalSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_compile_definitions(CoreSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(NamAdapterSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(ProductE2E PRIVATE GEILALIZER_USE_NAMCORE)
+    target_compile_definitions(FunctionalSmoke PRIVATE GEILALIZER_USE_NAMCORE)
 endif()
 
 enable_testing()
 add_test(NAME CoreSmoke COMMAND CoreSmoke)
 add_test(NAME NamAdapterSmoke COMMAND NamAdapterSmoke)
 add_test(NAME ProductE2E COMMAND ProductE2E)
-set_tests_properties(CoreSmoke ProductE2E PROPERTIES
+add_test(NAME FunctionalSmoke COMMAND FunctionalSmoke)
+set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
 set_tests_properties(NamAdapterSmoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+

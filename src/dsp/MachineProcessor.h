@@ -27,6 +27,7 @@ public:
         bool postEmtSafetyLimiterActive = false;
         bool finalSafetyLimiterActive = false;
         bool limiterActive = false;
+        std::array<float, core::kMaxMonoChannels> channelPeaks {};
     };
 
     void prepare(double sampleRate, int maxBlockSize);

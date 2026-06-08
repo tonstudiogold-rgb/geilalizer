@@ -27,6 +27,8 @@ void AudioEngine::processRealtime(const std::vector<std::vector<float>>& monoCha
     session_.master.meterLeftPeak = meters.masterLeftPeak;
     session_.master.meterRightPeak = meters.masterRightPeak;
     session_.master.limiterActive = meters.limiterActive;
+    for (std::size_t i = 0; i < session_.channels.size(); ++i)
+        session_.channels[i].meterPeak = meters.channelPeaks[i];
 }
 
 } // namespace geilalizer::core

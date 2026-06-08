@@ -1,6 +1,9 @@
 #include "MainComponent.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <thread>
 #include <utility>
 
 namespace
@@ -14,6 +17,18 @@ const auto red = juce::Colour { 0xffd71919 };
 const auto green = juce::Colour { 0xff35c925 };
 const auto text = juce::Colour { 0xffeeeeee };
 const auto muted = juce::Colour { 0xff9b9b9b };
+
+float sanitisePeak(float peak)
+{
+    if (!std::isfinite(peak) || peak < 0.0f)
+        return 0.0f;
+    return std::min(peak, 1.0f);
+}
+
+int peakToSegments(float peak)
+{
+    return juce::jlimit(0, 14, static_cast<int>(std::ceil(sanitisePeak(peak) * 14.0f)));
+}
 
 void drawPanel(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title = {})
 {
@@ -110,7 +125,6 @@ void drawSignalBlock(juce::Graphics& g, juce::Rectangle<int> area, const juce::S
 void drawArrow(juce::Graphics& g, juce::Rectangle<int> area)
 {
     juce::Path p;
-    const float cx = (float) area.getCentreX();
     const float cy = (float) area.getCentreY();
     p.startNewSubPath((float) area.getX() + 3.0f, cy);
     p.lineTo((float) area.getRight() - 7.0f, cy);
@@ -119,7 +133,6 @@ void drawArrow(juce::Graphics& g, juce::Rectangle<int> area)
     p.lineTo((float) area.getRight() - 12.0f, cy + 5.0f);
     g.setColour(muted.withAlpha(0.8f));
     g.strokePath(p, juce::PathStrokeType(1.7f));
-    (void) cx;
 }
 } // namespace
 
@@ -128,11 +141,20 @@ class MainComponent::MeterPlaceholder final : public juce::Component
 public:
     explicit MeterPlaceholder(juce::String labelText) : label(std::move(labelText)) {}
 
+    void setLevels(float newLeft, float newRight)
+    {
+        left = sanitisePeak(newLeft);
+        right = sanitisePeak(newRight);
+        repaint();
+    }
+
     void paint(juce::Graphics& g) override
     {
         drawPanel(g, getLocalBounds(), {});
         auto area = getLocalBounds().reduced(10, 12);
-        drawLedMeter(g, area.removeFromTop(area.getHeight() - 24), 11, label.containsIgnoreCase("master"));
+        const bool stereo = label.containsIgnoreCase("L / R");
+        const int lit = stereo ? peakToSegments(std::max(left, right)) : peakToSegments(left);
+        drawLedMeter(g, area.removeFromTop(area.getHeight() - 24), lit, stereo);
         g.setColour(text.withAlpha(0.8f));
         g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
         g.drawText(label, area, juce::Justification::centred);
@@ -140,13 +162,15 @@ public:
 
 private:
     juce::String label;
+    float left = 0.0f;
+    float right = 0.0f;
 };
 
 class MainComponent::ChannelStrip final : public juce::Component,
                                          public juce::FileDragAndDropTarget
 {
 public:
-    explicit ChannelStrip(int channelIndex) : index(channelIndex)
+    ChannelStrip(int channelIndex, MainComponent& ownerComponent) : index(channelIndex), owner(ownerComponent)
     {
         inputLabel.setText("INPUT", juce::dontSendNotification);
         inputLabel.setJustificationType(juce::Justification::centred);
@@ -158,13 +182,23 @@ public:
         armButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff540b0b });
         armButton.setColour(juce::TextButton::buttonOnColourId, red);
         armButton.setColour(juce::TextButton::textColourOffId, text);
+        armButton.onClick = [this]
+        {
+            const std::lock_guard<std::mutex> lock(owner.trackMutex);
+            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).armed = armButton.getToggleState();
+        };
         addAndMakeVisible(armButton);
 
         inputGain.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         inputGain.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 17);
-        inputGain.setRange(-12.0, 12.0, 0.1);
-        inputGain.setValue((channelIndex % 7 - 3) * 0.7, juce::dontSendNotification);
+        inputGain.setRange(geilalizer::core::kInputGainMinDb, geilalizer::core::kInputGainMaxDb, 0.1);
+        inputGain.setValue(geilalizer::core::kDefaultInputGainDb, juce::dontSendNotification);
         inputGain.setTextValueSuffix(" dB");
+        inputGain.onValueChange = [this]
+        {
+            const std::lock_guard<std::mutex> lock(owner.trackMutex);
+            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setInputGainDb(static_cast<float>(inputGain.getValue()));
+        };
         addAndMakeVisible(inputGain);
     }
 
@@ -174,8 +208,31 @@ public:
     void filesDropped(const juce::StringArray& files, int, int) override
     {
         dragging = false;
-        loaded = ! files.isEmpty();
+        if (! files.isEmpty())
+            owner.importFileToChannel(juce::File(files[0]), static_cast<std::size_t>(index - 1));
         repaint();
+    }
+
+    void setLoaded(bool shouldBeLoaded)
+    {
+        loaded = shouldBeLoaded;
+        repaint();
+    }
+
+    void setMeterPeak(float peak)
+    {
+        meterPeak = sanitisePeak(peak);
+        repaint();
+    }
+
+    void setArmState(bool armed)
+    {
+        armButton.setToggleState(armed, juce::dontSendNotification);
+    }
+
+    void setInputGainValue(float db)
+    {
+        inputGain.setValue(db, juce::dontSendNotification);
     }
 
     void paint(juce::Graphics& g) override
@@ -185,10 +242,10 @@ public:
 
         g.setColour(text);
         g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
-        g.drawText(juce::String(index), area.removeFromTop(20), juce::Justification::centred);
+        g.drawText(juce::String(index).paddedLeft('0', 2), area.removeFromTop(20), juce::Justification::centred);
 
         auto meterArea = juce::Rectangle<int>(7, 30, 13, 94);
-        drawLedMeter(g, meterArea, loaded ? 12 : (6 + index % 6), false);
+        drawLedMeter(g, meterArea, loaded ? peakToSegments(std::max(0.08f, meterPeak)) : peakToSegments(meterPeak), false);
 
         g.setColour(muted);
         g.setFont(juce::FontOptions(9.0f));
@@ -214,8 +271,10 @@ public:
 
 private:
     int index = 0;
+    MainComponent& owner;
     bool dragging = false;
     bool loaded = false;
+    float meterPeak = 0.0f;
     juce::Label inputLabel;
     juce::Slider inputGain;
     juce::TextButton armButton;
@@ -230,7 +289,6 @@ public:
         heading.setFont(juce::FontOptions(22.0f, juce::Font::bold));
         heading.setColour(juce::Label::textColourId, text);
         addAndMakeVisible(heading);
-
         for (auto* label : { &format, &resolution, &speed })
         {
             label->setColour(juce::Label::textColourId, text);
@@ -239,19 +297,9 @@ public:
         format.setText("Format: WAV", juce::dontSendNotification);
         resolution.setText("Resolution: 24 Bit", juce::dontSendNotification);
         speed.setText("Tape speed: 15 IPS", juce::dontSendNotification);
-
-        exportButton.setButtonText("RENDER");
-        exportButton.onClick = [this]
-        {
-            if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
-                dw->exitModalState(1);
-        };
-        addAndMakeVisible(exportButton);
-        setSize(410, 230);
+        setSize(410, 160);
     }
-
     void paint(juce::Graphics& g) override { drawPanel(g, getLocalBounds(), {}); }
-
     void resized() override
     {
         auto area = getLocalBounds().reduced(24, 18);
@@ -259,19 +307,17 @@ public:
         format.setBounds(area.removeFromTop(28));
         resolution.setBounds(area.removeFromTop(28));
         speed.setBounds(area.removeFromTop(28));
-        area.removeFromTop(22);
-        exportButton.setBounds(area.removeFromTop(34).withSizeKeepingCentre(130, 34));
     }
-
 private:
     juce::Label heading, format, resolution, speed;
-    juce::TextButton exportButton;
 };
 
 MainComponent::MainComponent()
 {
     setOpaque(true);
     setSize(1280, 1180);
+    formatManager.registerBasicFormats();
+    audioBlockInputs.resize(channelCount);
 
     titleLabel.setText("24-SPUR STANDALONE GEILALIZER – BANDMASCHINE", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
@@ -279,14 +325,30 @@ MainComponent::MainComponent()
     titleLabel.setColour(juce::Label::textColourId, text);
     addAndMakeVisible(titleLabel);
 
-    loadButton.setButtonText("REW");
+    loadButton.setButtonText("LOAD");
+    rewButton.setButtonText("REW");
     stopButton.setButtonText("STOP");
     playButton.setButtonText("PLAY");
     exportButton.setButtonText("RENDER");
     playButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff116b12 });
     exportButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff5b5b5b });
-    for (auto* button : { &loadButton, &playButton, &stopButton, &exportButton })
+    for (auto* button : { &loadButton, &rewButton, &playButton, &stopButton, &exportButton })
         addAndMakeVisible(button);
+
+    loadButton.onClick = [this]
+    {
+        activeFileChooser = std::make_shared<juce::FileChooser>("Audiodatei laden", juce::File{}, "*.wav;*.aiff;*.aif;*.flac;*.mp3");
+        activeFileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this, chooser = activeFileChooser](const juce::FileChooser& fc)
+            {
+                const auto file = fc.getResult();
+                if (file.existsAsFile())
+                    importFileToFirstAvailableChannel(file);
+            });
+    };
+    rewButton.onClick = [this] { rewind(); };
+    stopButton.onClick = [this] { stop(); };
+    playButton.onClick = [this] { play(); };
     exportButton.onClick = [this] { showExportDialog(); };
 
     channelViewport.setViewedComponent(&channelContainer, false);
@@ -296,7 +358,7 @@ MainComponent::MainComponent()
 
     for (int i = 1; i <= channelCount; ++i)
     {
-        auto* strip = channels.add(new ChannelStrip(i));
+        auto* strip = channels.add(new ChannelStrip(i, *this));
         channelContainer.addAndMakeVisible(strip);
     }
 
@@ -307,6 +369,11 @@ MainComponent::MainComponent()
     limiterToggle.setButtonText("LIMITER ON");
     limiterToggle.setToggleState(true, juce::dontSendNotification);
     limiterToggle.setColour(juce::ToggleButton::textColourId, text);
+    limiterToggle.onClick = [this]
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        audioEngine.session().master.limiterEnabled = limiterToggle.getToggleState();
+    };
     addAndMakeVisible(limiterToggle);
 
     outputTrimLabel.setText("OUTPUT", juce::dontSendNotification);
@@ -318,6 +385,11 @@ MainComponent::MainComponent()
     outputTrim.setRange(-12.0, 12.0, 0.1);
     outputTrim.setValue(0.0, juce::dontSendNotification);
     outputTrim.setTextValueSuffix(" dB");
+    outputTrim.onValueChange = [this]
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        audioEngine.session().master.outputTrimDb = static_cast<float>(outputTrim.getValue());
+    };
     addAndMakeVisible(outputTrim);
 
     masterMeter = std::make_unique<MeterPlaceholder>("L / R");
@@ -336,6 +408,363 @@ MainComponent::MainComponent()
     lf.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff303030 });
     lf.setColour(juce::TextButton::textColourOffId, text);
     lf.setColour(juce::Label::textColourId, text);
+
+    startTimerHz(30);
+    setAudioChannels(0, 2);
+}
+
+MainComponent::~MainComponent()
+{
+    shutdownAudio();
+}
+
+void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
+{
+    const std::lock_guard<std::mutex> lock(trackMutex);
+    deviceSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    deviceBlockSize = samplesPerBlockExpected > 0 ? samplesPerBlockExpected : 512;
+    audioEngine.prepare(deviceSampleRate, deviceBlockSize);
+    audioBlockInterleaved.assign(static_cast<std::size_t>(deviceBlockSize) * 2, 0.0f);
+}
+
+void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
+{
+    if (info.buffer == nullptr)
+        return;
+
+    info.clearActiveBufferRegion();
+    if (! playing.load())
+        return;
+
+    const int numSamples = info.numSamples;
+    const auto startFrame = playheadFrame.load();
+    bool reachedEnd = false;
+
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        if (audioBlockInputs.size() != channelCount)
+            audioBlockInputs.resize(channelCount);
+        for (auto& channel : audioBlockInputs)
+            channel.assign(static_cast<std::size_t>(numSamples), 0.0f);
+
+        for (std::size_t ch = 0; ch < trackBuffers.size(); ++ch)
+        {
+            const auto& src = trackBuffers[ch];
+            if (src.empty())
+                continue;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto frame = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + i));
+                if (frame < src.size())
+                    audioBlockInputs[ch][static_cast<std::size_t>(i)] = src[frame];
+            }
+        }
+
+        audioBlockInterleaved.assign(static_cast<std::size_t>(numSamples) * 2, 0.0f);
+        audioEngine.processRealtime(audioBlockInputs, static_cast<std::size_t>(numSamples), audioBlockInterleaved);
+    }
+
+    const int channelsToWrite = std::min(2, info.buffer->getNumChannels());
+    for (int sample = 0; sample < numSamples; ++sample)
+    {
+        const float left = audioBlockInterleaved[static_cast<std::size_t>(sample) * 2];
+        const float right = audioBlockInterleaved[static_cast<std::size_t>(sample) * 2 + 1];
+        if (channelsToWrite > 0) info.buffer->setSample(0, info.startSample + sample, left);
+        if (channelsToWrite > 1) info.buffer->setSample(1, info.startSample + sample, right);
+    }
+
+    const auto nextFrame = startFrame + numSamples;
+    playheadFrame.store(nextFrame);
+    reachedEnd = maxLoadedFrames() > 0 && static_cast<std::size_t>(nextFrame) >= maxLoadedFrames();
+    if (reachedEnd)
+        playing.store(false);
+}
+
+void MainComponent::releaseResources()
+{
+    const std::lock_guard<std::mutex> lock(trackMutex);
+    audioEngine.reset();
+}
+
+bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    return ! files.isEmpty();
+}
+
+void MainComponent::filesDropped(const juce::StringArray& files, int, int)
+{
+    if (! files.isEmpty())
+        importFileToFirstAvailableChannel(juce::File(files[0]));
+}
+
+bool MainComponent::importFileToFirstAvailableChannel(const juce::File& file)
+{
+    std::size_t channel = 0;
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        for (std::size_t i = 0; i < trackBuffers.size(); ++i)
+        {
+            if (trackBuffers[i].empty())
+            {
+                channel = i;
+                break;
+            }
+        }
+    }
+    return importFileToChannel(file, channel);
+}
+
+bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firstChannelIndex)
+{
+    if (! file.existsAsFile() || firstChannelIndex >= trackBuffers.size())
+    {
+        setStatus("Import fehlgeschlagen: Datei oder Zielkanal ungültig.");
+        return false;
+    }
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (reader == nullptr)
+    {
+        setStatus("Import fehlgeschlagen: Format nicht unterstützt.");
+        return false;
+    }
+
+    const auto numFrames = static_cast<int>(std::min<juce::int64>(reader->lengthInSamples, static_cast<juce::int64>(std::numeric_limits<int>::max())));
+    if (numFrames <= 0)
+    {
+        setStatus("Import fehlgeschlagen: Datei enthält keine Samples.");
+        return false;
+    }
+
+    const int channelsToRead = std::min<int>(2, static_cast<int>(reader->numChannels));
+    if (channelsToRead > 1 && firstChannelIndex + 1 >= trackBuffers.size())
+    {
+        setStatus("Stereo-Import braucht zwei freie Mono-Kanäle.");
+        return false;
+    }
+
+    juce::AudioBuffer<float> buffer(channelsToRead, numFrames);
+    buffer.clear();
+    reader->read(&buffer, 0, numFrames, 0, true, channelsToRead > 1);
+
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        for (int ch = 0; ch < channelsToRead; ++ch)
+        {
+            auto& dest = trackBuffers[firstChannelIndex + static_cast<std::size_t>(ch)];
+            dest.assign(static_cast<std::size_t>(numFrames), 0.0f);
+            const float* read = buffer.getReadPointer(ch);
+            std::copy(read, read + numFrames, dest.begin());
+            auto& state = audioEngine.session().channel(firstChannelIndex + static_cast<std::size_t>(ch));
+            state.setLoadedAudioFile(file.getFullPathName().toStdString(), ch, static_cast<std::size_t>(numFrames));
+            state.armed = true;
+        }
+    }
+
+    projectName = file.getFileNameWithoutExtension();
+    setStatus(file.getFileName() + " geladen auf Kanal " + juce::String(static_cast<int>(firstChannelIndex + 1))
+              + (channelsToRead > 1 ? " / " + juce::String(static_cast<int>(firstChannelIndex + 2)) : ""));
+    refreshChannelVisuals();
+    repaint();
+    return true;
+}
+
+void MainComponent::play()
+{
+    if (maxLoadedFrames() == 0)
+    {
+        setStatus("Nichts geladen – erst Audiodatei per LOAD oder Drag & Drop importieren.");
+        return;
+    }
+    if (static_cast<std::size_t>(std::max<std::int64_t>(0, playheadFrame.load())) >= maxLoadedFrames())
+        rewind();
+    playing.store(true);
+    setStatus("PLAY – Wiedergabe über die feste NAM/IR-Kette läuft.");
+}
+
+void MainComponent::stop()
+{
+    playing.store(false);
+    setStatus("STOP");
+}
+
+void MainComponent::rewind()
+{
+    playing.store(false);
+    playheadFrame.store(0);
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        audioEngine.reset();
+    }
+    setStatus("REW – Position auf Start zurückgesetzt.");
+}
+
+std::vector<std::vector<float>> MainComponent::snapshotTrackBuffers() const
+{
+    const std::lock_guard<std::mutex> lock(trackMutex);
+    std::vector<std::vector<float>> snapshot;
+    snapshot.reserve(trackBuffers.size());
+    for (const auto& buffer : trackBuffers)
+        snapshot.push_back(buffer);
+    return snapshot;
+}
+
+std::size_t MainComponent::maxLoadedFrames() const
+{
+    const std::lock_guard<std::mutex> lock(trackMutex);
+    std::size_t frames = 0;
+    for (const auto& buffer : trackBuffers)
+        frames = std::max(frames, buffer.size());
+    return frames;
+}
+
+juce::String MainComponent::currentTimeText() const
+{
+    const auto frame = std::max<std::int64_t>(0, playheadFrame.load());
+    const auto seconds = deviceSampleRate > 0.0 ? static_cast<double>(frame) / deviceSampleRate : 0.0;
+    const int mins = static_cast<int>(seconds / 60.0);
+    const int secs = static_cast<int>(seconds) % 60;
+    const int frames = static_cast<int>((seconds - std::floor(seconds)) * 25.0);
+    return juce::String::formatted("%02d:%02d:%02d", mins, secs, frames);
+}
+
+void MainComponent::showExportDialog()
+{
+    if (maxLoadedFrames() == 0)
+    {
+        setStatus("Render nicht möglich: keine Audiodateien geladen.");
+        return;
+    }
+
+    activeFileChooser = std::make_shared<juce::FileChooser>("Geilalizer Render speichern",
+                                                            juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
+                                                                .getChildFile(projectName + "-geilalized.wav"),
+                                                            "*.wav");
+    activeFileChooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this, chooser = activeFileChooser](const juce::FileChooser& fc)
+        {
+            auto out = fc.getResult();
+            if (out == juce::File{})
+                return;
+            if (! out.hasFileExtension("wav"))
+                out = out.withFileExtension("wav");
+            renderToFileAsync(out, 48000.0, 24);
+        });
+}
+
+void MainComponent::renderToFileAsync(const juce::File& outputFile, double sampleRate, int bitDepth)
+{
+    const auto buffers = snapshotTrackBuffers();
+    geilalizer::core::SessionState sessionCopy;
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        sessionCopy = audioEngine.session();
+    }
+
+    setStatus("Render läuft…");
+    exportButton.setEnabled(false);
+    const juce::Component::SafePointer<MainComponent> safeThis(this);
+    std::thread([safeThis, outputFile, sampleRate, bitDepth, buffers, sessionCopy]() mutable
+    {
+        geilalizer::core::RenderEngine renderer;
+        geilalizer::core::RenderRequest request;
+        request.sampleRate = sampleRate;
+        request.bitDepth = bitDepth;
+        request.fullLength = true;
+        const auto result = renderer.render(sessionCopy, buffers, request);
+        juce::String message;
+        bool ok = result.completed;
+        if (! ok)
+            message = result.message;
+        else
+            ok = safeThis != nullptr && safeThis->writeWavFile(outputFile, result.interleavedStereo,
+                                                              result.interleavedStereo.size() / 2,
+                                                              sampleRate, bitDepth, message);
+
+        juce::MessageManager::callAsync([safeThis, ok, outputFile, message]
+        {
+            if (safeThis == nullptr)
+                return;
+            safeThis->exportButton.setEnabled(true);
+            safeThis->setStatus(ok ? "Render fertig: " + outputFile.getFullPathName() : "Render fehlgeschlagen: " + message);
+        });
+    }).detach();
+}
+
+bool MainComponent::writeWavFile(const juce::File& outputFile, const std::vector<float>& interleavedStereo,
+                                 std::size_t frames, double sampleRate, int bitDepth, juce::String& errorMessage)
+{
+    outputFile.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> stream(outputFile.createOutputStream());
+    if (stream == nullptr || ! stream->openedOk())
+    {
+        errorMessage = "Ausgabedatei kann nicht geöffnet werden.";
+        return false;
+    }
+
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(stream.get(), sampleRate, 2,
+                                                                        static_cast<unsigned int>(bitDepth), {}, 0));
+    if (writer == nullptr)
+    {
+        errorMessage = "WAV Writer konnte nicht erstellt werden.";
+        return false;
+    }
+    stream.release();
+
+    juce::AudioBuffer<float> buffer(2, static_cast<int>(frames));
+    for (int i = 0; i < static_cast<int>(frames); ++i)
+    {
+        buffer.setSample(0, i, interleavedStereo[static_cast<std::size_t>(i) * 2]);
+        buffer.setSample(1, i, interleavedStereo[static_cast<std::size_t>(i) * 2 + 1]);
+    }
+
+    if (! writer->writeFromAudioSampleBuffer(buffer, 0, static_cast<int>(frames)))
+    {
+        errorMessage = "WAV Samples konnten nicht geschrieben werden.";
+        return false;
+    }
+    return true;
+}
+
+void MainComponent::timerCallback()
+{
+    refreshChannelVisuals();
+    refreshMasterVisuals();
+    repaint();
+}
+
+void MainComponent::refreshChannelVisuals()
+{
+    const std::lock_guard<std::mutex> lock(trackMutex);
+    for (int i = 0; i < channels.size(); ++i)
+    {
+        auto& state = audioEngine.session().channel(static_cast<std::size_t>(i));
+        channels[i]->setLoaded(state.hasAudioFile);
+        channels[i]->setArmState(state.armed);
+        channels[i]->setInputGainValue(state.inputGainDb);
+        channels[i]->setMeterPeak(state.meterPeak);
+    }
+}
+
+void MainComponent::refreshMasterVisuals()
+{
+    const std::lock_guard<std::mutex> lock(trackMutex);
+    const auto& master = audioEngine.session().master;
+    if (masterMeter != nullptr)
+        masterMeter->setLevels(master.meterLeftPeak, master.meterRightPeak);
+    limiterToggle.setToggleState(master.limiterEnabled, juce::dontSendNotification);
+    outputTrim.setValue(master.outputTrimDb, juce::dontSendNotification);
+    limiterActivityLabel.setText((playing.load() ? "PLAY" : "STOP") + juce::String("  |  ")
+                                 + (master.limiterActive ? "LIMITER ACTIVE" : "LIMITER READY")
+                                 + "  |  15 IPS", juce::dontSendNotification);
+}
+
+void MainComponent::setStatus(juce::String message)
+{
+    const juce::ScopedLock lock(statusLock);
+    statusText = std::move(message);
+    repaint();
 }
 
 void MainComponent::paint(juce::Graphics& g)
@@ -343,14 +772,13 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillAll(background);
 
     auto bounds = getLocalBounds().reduced(16);
-    auto header = bounds.removeFromTop(32);
-    (void) header;
+    bounds.removeFromTop(32);
 
     auto deck = bounds.removeFromTop(205);
     drawPanel(g, deck, "ÜBERSICHT");
     auto deckInner = deck.reduced(18, 26);
-    drawReel(g, deckInner.removeFromLeft(315).reduced(6, 2), 0.35f);
-    drawReel(g, deckInner.removeFromRight(315).reduced(6, 2), -0.22f);
+    drawReel(g, deckInner.removeFromLeft(315).reduced(6, 2), playing.load() ? 0.95f : 0.35f);
+    drawReel(g, deckInner.removeFromRight(315).reduced(6, 2), playing.load() ? -0.85f : -0.22f);
 
     auto transportPanel = deck.withSizeKeepingCentre(360, 104).translated(0, -12);
     drawPanel(g, transportPanel, {});
@@ -363,15 +791,15 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillRect(projectBox);
     g.setColour(text);
     g.setFont(juce::FontOptions(10.0f));
-    g.drawText("My Mix – Geilalizer Session", projectBox.reduced(5, 0), juce::Justification::centred);
+    g.drawText(projectName, projectBox.reduced(5, 0), juce::Justification::centred);
     g.setFont(juce::FontOptions(17.0f, juce::Font::bold));
-    g.drawText("01:02:15:12", transportPanel.getX() + 108, transportPanel.getY() + 39, 140, 24, juce::Justification::centred);
+    g.drawText(currentTimeText(), transportPanel.getX() + 108, transportPanel.getY() + 39, 140, 24, juce::Justification::centred);
     g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
     g.drawText("15 IPS", transportPanel.getRight() - 72, transportPanel.getY() + 42, 50, 18, juce::Justification::centred);
 
     auto btnRow = juce::Rectangle<int>(transportPanel.getX() + 29, transportPanel.getBottom() - 36, 302, 26);
+    drawTransportButton(g, btnRow.removeFromLeft(48), "LOAD"); btnRow.removeFromLeft(7);
     drawTransportButton(g, btnRow.removeFromLeft(48), "REW"); btnRow.removeFromLeft(7);
-    drawTransportButton(g, btnRow.removeFromLeft(48), "FFWD"); btnRow.removeFromLeft(7);
     drawTransportButton(g, btnRow.removeFromLeft(48), "STOP"); btnRow.removeFromLeft(7);
     drawTransportButton(g, btnRow.removeFromLeft(48), "PLAY", juce::Colour { 0xff128111 }); btnRow.removeFromLeft(7);
     drawTransportButton(g, btnRow.removeFromLeft(48), "REC", red.darker(0.2f));
@@ -395,7 +823,6 @@ void MainComponent::paint(juce::Graphics& g)
 
     auto channelArea = bounds.removeFromTop(392);
     drawPanel(g, channelArea, "24-SPUR KANÄLE");
-
     auto masterTextArea = channelArea.removeFromRight(116).reduced(10, 34);
     g.setColour(text);
     g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
@@ -438,8 +865,8 @@ void MainComponent::paint(juce::Graphics& g)
     auto transport = b.removeFromLeft(320);
     drawPanel(g, transport, "TRANSPORT");
     auto tr = transport.reduced(14, 38);
-    drawTransportButton(g, tr.removeFromLeft(54), "<<"); tr.removeFromLeft(8);
-    drawTransportButton(g, tr.removeFromLeft(54), ">>"); tr.removeFromLeft(8);
+    drawTransportButton(g, tr.removeFromLeft(54), "LOAD"); tr.removeFromLeft(8);
+    drawTransportButton(g, tr.removeFromLeft(54), "REW"); tr.removeFromLeft(8);
     drawTransportButton(g, tr.removeFromLeft(54), "STOP"); tr.removeFromLeft(8);
     drawTransportButton(g, tr.removeFromLeft(54), "PLAY", juce::Colour { 0xff128111 }); tr.removeFromLeft(8);
     drawTransportButton(g, tr.removeFromLeft(54), "REC", red.darker(0.2f));
@@ -449,15 +876,15 @@ void MainComponent::paint(juce::Graphics& g)
     drawPanel(g, time, "TIME / POSITION");
     g.setColour(text);
     g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-    g.drawText("01:02:15:12", time.reduced(14, 46), juce::Justification::centred);
+    g.drawText(currentTimeText(), time.reduced(14, 46), juce::Justification::centred);
 
     b.removeFromLeft(18);
     auto project = b.removeFromLeft(230);
     drawPanel(g, project, "PROJECT");
     g.setColour(text);
     g.setFont(juce::FontOptions(11.0f));
-    g.drawText("My Mix – Geilalizer Session", project.reduced(14, 45), juce::Justification::centred);
-    g.drawText("48.0 kHz  |  24 Bit  |  15 IPS", project.reduced(14, 70), juce::Justification::centred);
+    g.drawText(projectName, project.reduced(14, 45), juce::Justification::centred);
+    g.drawText(juce::String(deviceSampleRate / 1000.0, 1) + " kHz  |  24 Bit  |  15 IPS", project.reduced(14, 70), juce::Justification::centred);
 
     b.removeFromLeft(18);
     auto render = b.removeFromLeft(200);
@@ -470,14 +897,23 @@ void MainComponent::paint(juce::Graphics& g)
 
     b.removeFromLeft(18);
     drawPanel(g, b, "OUTPUT METERS");
-    drawLedMeter(g, b.reduced(35, 34), 12, true);
+    int lit = 0;
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        lit = peakToSegments(std::max(audioEngine.session().master.meterLeftPeak, audioEngine.session().master.meterRightPeak));
+    }
+    drawLedMeter(g, b.reduced(35, 34), lit, true);
 
     auto footer = bounds.removeFromTop(76);
     drawPanel(g, footer, {});
+    juce::String status;
+    {
+        const juce::ScopedLock lock(statusLock);
+        status = statusText;
+    }
     g.setColour(text.withAlpha(0.85f));
     g.setFont(juce::FontOptions(11.0f));
-    g.drawText("NAM-Modelle sind fest eingebaut und werden beim Start geladen. Alle Fader arbeiten Post-Processing. Limiter-Station kann ein/aus geschaltet werden.",
-               footer.reduced(18), juce::Justification::centredLeft);
+    g.drawText(status, footer.reduced(18), juce::Justification::centredLeft);
     g.setFont(juce::FontOptions(27.0f, juce::Font::bold));
     g.drawText("GEILALIZER", footer.removeFromRight(250), juce::Justification::centred);
 }
@@ -518,24 +954,14 @@ void MainComponent::resized()
     limiterToggle.setBounds(m.removeFromTop(24));
     limiterActivityLabel.setBounds(m.removeFromTop(42));
 
-    auto deckArea = juce::Rectangle<int>(getWidth() / 2 - 150, 92, 300, 28);
-    loadButton.setBounds(deckArea.removeFromLeft(55));
+    auto deckArea = juce::Rectangle<int>(getWidth() / 2 - 180, 92, 410, 28);
+    loadButton.setBounds(deckArea.removeFromLeft(66));
+    deckArea.removeFromLeft(6);
+    rewButton.setBounds(deckArea.removeFromLeft(55));
     deckArea.removeFromLeft(6);
     stopButton.setBounds(deckArea.removeFromLeft(55));
     deckArea.removeFromLeft(6);
     playButton.setBounds(deckArea.removeFromLeft(55));
     deckArea.removeFromLeft(6);
-    exportButton.setBounds(deckArea.removeFromLeft(78));
-}
-
-void MainComponent::showExportDialog()
-{
-    juce::DialogWindow::LaunchOptions options;
-    options.dialogTitle = "Render / Export";
-    options.dialogBackgroundColour = panelDark;
-    options.content.setOwned(new ExportSettingsComponent());
-    options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
-    options.resizable = false;
-    options.launchAsync();
+    exportButton.setBounds(deckArea.removeFromLeft(88));
 }
