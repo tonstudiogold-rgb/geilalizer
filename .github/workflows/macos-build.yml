@@ -32,7 +32,12 @@ jobs:
           test -d "$APP_PATH"
           mkdir -p dist
           ditto -c -k --keepParent "$APP_PATH" "dist/24-Track Standalone Geilalizer-macOS.zip"
+          hdiutil create -volname "24-Track Standalone Geilalizer" \
+            -srcfolder "$APP_PATH" \
+            -ov -format UDZO \
+            "dist/24-Track Standalone Geilalizer-macOS.dmg"
           shasum -a 256 "dist/24-Track Standalone Geilalizer-macOS.zip" > "dist/24-Track Standalone Geilalizer-macOS.zip.sha256"
+          shasum -a 256 "dist/24-Track Standalone Geilalizer-macOS.dmg" > "dist/24-Track Standalone Geilalizer-macOS.dmg.sha256"
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
@@ -41,3 +46,5 @@ jobs:
           path: |
             dist/24-Track Standalone Geilalizer-macOS.zip
             dist/24-Track Standalone Geilalizer-macOS.zip.sha256
+            dist/24-Track Standalone Geilalizer-macOS.dmg
+            dist/24-Track Standalone Geilalizer-macOS.dmg.sha256
