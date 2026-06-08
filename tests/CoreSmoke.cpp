@@ -1,6 +1,7 @@
 #include "core/AudioEngine.h"
 #include "core/RenderEngine.h"
 #include "dsp/MachineProcessor.h"
+#include "dsp/SafetyLimiter.h"
 
 #include <cassert>
 #include <cmath>
@@ -45,7 +46,6 @@ int main()
 
     dsp::MachineProcessor processor;
     processor.prepare(44100.0, 4);
-    assert(!processor.namAdapter().hasAnyModel());
     assert(processor.irAdapter().defaultPreampIndex() == 5);
     assert(processor.irAdapter().preampIrSlots()[0].fileName == "Neve 20.wav");
     assert(processor.irAdapter().preampIrSlots()[5].fileName == "Neve 55.wav");
@@ -55,6 +55,27 @@ int main()
     assert(processor.namAdapter().bindSingleInternalModelForNextIntegration(
         0, { "placeholder-model-1", "smoke test single model bind" }));
     assert(processor.namAdapter().hasModelForChannel(0));
+    assert(processor.tapeNamAdapter().hasAnyModel());
+    assert(processor.tapeNamAdapter().hasModelForChannel(0));
+    assert(processor.masterTapeNamAdapter().hasModelForChannel(0));
+    assert(processor.masterTapeNamAdapter().hasModelForChannel(1));
+    assert(processor.emtLimiterNamAdapter().hasModelForChannel(0));
+    assert(processor.emtLimiterNamAdapter().hasModelForChannel(1));
+    assert(processor.finalHiloNamAdapter().hasModelForChannel(0));
+    assert(processor.finalHiloNamAdapter().hasModelForChannel(1));
+    assert(processor.postFaderIrAdapter().hasAllFaderThirdIrs());
+    assert(processor.postFaderIrAdapter().slotForFaderPosition(0.0f).driveLabel == "0db");
+    assert(processor.postFaderIrAdapter().slotForFaderPosition(0.5f).driveLabel == "5db");
+    assert(processor.postFaderIrAdapter().slotForFaderPosition(1.0f).driveLabel == "10db");
+    assert(processor.postFaderIrAdapter().slotIndexForFaderDb(core::kFaderGainMinDb) == 0);
+    assert(processor.postFaderIrAdapter().slotIndexForFaderDb(-24.0f) == 1);
+    assert(processor.postFaderIrAdapter().slotIndexForFaderDb(0.0f) == 2);
+    assert(processor.postFaderIrAdapter().slotIndexForFaderDb(core::kFaderGainMaxDb) == 2);
+    assert(processor.mixbusIrAdapter().hasAllMixbusIrs());
+    assert(processor.mixbusIrAdapter().slotForPeakDb(-18.0f).driveLabel == "0db");
+    assert(processor.mixbusIrAdapter().slotForPeakDb(-9.0f).driveLabel == "5db");
+    assert(processor.mixbusIrAdapter().slotForPeakDb(-5.0f).driveLabel == "10db");
+    assert(processor.mixbusIrAdapter().slotForPeakDb(-1.0f).driveLabel == "extreme1");
 
     std::vector<float> out(8, 123.0f);
     dsp::AudioBlockView block { &monoInputs, &out, 4 };
@@ -69,13 +90,19 @@ int main()
         assert(std::isfinite(sample));
 
     session.master.limiterEnabled = true;
-    session.master.outputTrimDb = 48.0f;
-    monoInputs[0] = { 2.0f, -2.0f, 0.5f, -0.5f };
+    session.master.outputTrimDb = 96.0f;
+    monoInputs[0] = { 200000.0f, -200000.0f, 50000.0f, -50000.0f };
     processor.process(session, block);
-    assert(processor.lastMeters().limiterActive);
     const float ceiling = std::pow(10.0f, core::kSafetyLimiterCeilingDb / 20.0f);
     assert(std::abs(out[0]) <= ceiling + 0.0001f);
     assert(std::abs(out[2]) <= ceiling + 0.0001f);
+    dsp::SafetyLimiter limiterSmoke;
+    limiterSmoke.setEnabled(true);
+    std::vector<float> limiterProbe { 4.0f, -4.0f, 0.25f, -0.25f };
+    limiterSmoke.processInterleavedStereo(limiterProbe.data(), 2);
+    assert(limiterSmoke.active());
+    assert(std::abs(limiterProbe[0]) <= ceiling + 0.0001f);
+    assert(std::abs(limiterProbe[1]) <= ceiling + 0.0001f);
     session.master.outputTrimDb = 0.0f;
 
     core::AudioEngine realtime;

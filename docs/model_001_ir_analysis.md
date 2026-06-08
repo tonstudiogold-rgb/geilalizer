@@ -207,12 +207,12 @@ This supports the 1073-front-panel interpretation: lower/mid gain positions are 
 
 ## Recommended hidden machine use
 
-Do not integrate these as NAM. Create a separate hidden IR stage, e.g. `HiddenIrAdapter`, after hidden NAM and before fader/pan:
+Do not integrate these as NAM. Create a separate hidden IR stage, e.g. `HiddenIrAdapter`, driven by Input Gain before the fixed hidden console NAM and before fader/pan:
 
 Input
 → Input Gain
-→ Hidden NAM Adapter
 → Hidden 1073 IR Adapter
+→ Hidden NAM Adapter / Neve console line stage
 → Fader
 → Pan
 → Stereo Sum

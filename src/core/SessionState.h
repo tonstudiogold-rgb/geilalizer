@@ -28,6 +28,8 @@ struct StereoSplitImportResult
 
 struct MasterState
 {
+    // User-facing limiter switch controls only the hidden EMT 266X NAM limiter stage.
+    // Product safety limiters remain always-on protection stages.
     bool limiterEnabled = kDefaultLimiterEnabled;
     float outputTrimDb = kDefaultOutputTrimDb;
     float meterLeftPeak = 0.0f;

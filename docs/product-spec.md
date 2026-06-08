@@ -19,7 +19,7 @@
 11. No EQ controls are exposed.
 12. Invisible technical filters may be used only when necessary for correctness or safety.
 13. NAM models are not user-loadable, not visible, and not managed through the UI.
-14. NAM integration happens later one model at a time, only after the hidden adapter integration point requires a specific model.
+14. NAM integration remains fixed and internal: only product-selected models are wired into hidden slots, never exposed as a loader or selector.
 
 ## Channel contract
 
@@ -34,14 +34,48 @@ Each channel is mono and has:
 - Meter
 - Load/drop affordance for audio import
 
+Fixed hidden per-channel signal order:
+
+Input
+→ Input Gain / IR drive
+→ Selected hidden 1073 IR/preamp colour
+→ Fixed hidden Neve 5315 console NAM line stage
+→ Fixed hidden Studer C37 tape NAM
+→ Future hidden fader model/mapped fader files
+→ Visible Fader gain
+→ Hidden post-fader SSL 4000 G IR mapping by fader third
+→ Pan
+→ Stereo Sum
+→ Mixbus heat measurement from summed level only
+→ Pre-mixbus-IR safety limiter, ceiling -0.2 dBFS
+→ Hidden Model 5 SSL 4000 G mixbus IR selected by summed level
+→ Fixed hidden Studer C37 tape NAM again on the stereo mixbus
+→ Output Trim/Gain
+→ Switchable hidden EMT 266X NAM limiter, on/off only
+→ Safety limiter, ceiling -0.2 dBFS
+→ Fixed hidden final Hilo NAM 1
+→ Final safety limiter, ceiling -0.2 dBFS
+→ Output / Render
+
+Model 5 mixbus IR selection is hidden and purely level-dependent; fader positions and active-channel counts are not used:
+
+| Summed peak before pre-IR safety limiter | Hidden Model 5 IR |
+| --- | --- |
+| below -12 dBFS | `4000 G mixbuss 0db_dc.wav` |
+| -12 dBFS to below -7 dBFS | `4000 G mixbuss 5db_dc.wav` |
+| -7 dBFS to below -3 dBFS | `4000 G mixbuss 10db_dc.wav` |
+| -3 dBFS and hotter | `4000 G mixbuss extreme 1_dc.wav` |
+
+Important: the visible fader remains the user's level control. The SSL 4000 G IR family is a hidden post-fader coloration stage after that visible fader gain and before pan/sum: lower fader third = 0db, middle third = 5db, upper third = 10db.
+
 ## Master contract
 
 The master section has:
 
-- Limiter on/off
+- EMT 266X NAM limiter on/off (the only user-switchable hidden NAM limiter)
 - Master meter
-- Output gain trim knob
-- Limiter activity indicator
+- Output gain trim knob; default/middle position is neutral gain
+- Limiter activity indicator for fixed safety limiting
 
 ## Safety limiter contract
 
@@ -65,8 +99,8 @@ Export format:
 - JUCE via CMake FetchContent
 - CMake standalone app target
 - Portable core code where possible so CI/static checks can run outside macOS-specific packaging
-- Hidden NAM adapter comments and seams are allowed; user-facing NAM selection/loading is not allowed
+- Hidden NAM adapter uses NeuralAmpModelerCore internally when `GEILALIZER_ENABLE_NAMCORE=ON`; user-facing NAM selection/loading is not allowed
 
 ## Current scaffold status
 
-The scaffold provides the JUCE application entry point, a macOS-ready standalone CMake target, and an English UI shell with 24 channel strips plus master controls. Audio engine, file import, render/export, limiter, resampling, persistence, and hidden NAM adapter implementations are intentionally future work.
+The scaffold provides the JUCE application entry point, a macOS-ready standalone CMake target, an English UI shell with 24 channel strips plus master controls, shared realtime/render core processing, safety limiters, hidden IR stages including level-selected Model 5 mixbus IRs, and fixed hidden NAM slots for channel console/tape, second mixbus tape, optional EMT 266X limiter, and final Hilo NAM 1 when private model assets are present. File import, WAV export writing, resampling, persistence, and production UI wiring remain future work.

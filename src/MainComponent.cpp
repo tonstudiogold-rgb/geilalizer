@@ -5,11 +5,11 @@
 
 namespace
 {
-constexpr auto background = juce::Colour { 0xff151515 };
-constexpr auto panel = juce::Colour { 0xff222222 };
-constexpr auto panelDark = juce::Colour { 0xff1a1a1a };
-constexpr auto accent = juce::Colour { 0xffffb347 };
-constexpr auto text = juce::Colour { 0xffeeeeee };
+const auto background = juce::Colour { 0xff151515 };
+const auto panel = juce::Colour { 0xff222222 };
+const auto panelDark = juce::Colour { 0xff1a1a1a };
+const auto accent = juce::Colour { 0xffffb347 };
+const auto text = juce::Colour { 0xffeeeeee };
 
 void styleRotary(juce::Slider& slider, double min, double max, double value, const juce::String& suffix = {})
 {

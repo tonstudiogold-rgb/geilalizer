@@ -1,5 +1,7 @@
 #include "HiddenIrAdapter.h"
 
+#include "AssetPath.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -99,7 +101,8 @@ bool HiddenIrAdapter::loadNeve1073Directory(const std::filesystem::path& directo
 
 bool HiddenIrAdapter::loadNeve1073DirectoryIfPresent()
 {
-    const std::array<std::filesystem::path, 3> candidates {
+    const std::array<std::filesystem::path, 4> candidates {
+        resolveProductAssetPath("private_nam_models/model_001"),
         std::filesystem::path("private_nam_models/model_001"),
         std::filesystem::path("/opt/data/geilalizer/private_nam_models/model_001"),
         std::filesystem::current_path() / "private_nam_models/model_001"
