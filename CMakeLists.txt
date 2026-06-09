@@ -73,6 +73,7 @@ target_sources(Geilalizer
         src/core/AudioEngine.cpp
         src/core/AudioEngine.h
         src/core/ChannelState.h
+        src/core/ImportPlanner.h
         src/core/RenderEngine.cpp
         src/core/RenderEngine.h
         src/core/SessionState.h

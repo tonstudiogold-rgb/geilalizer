@@ -1,5 +1,7 @@
 #include "MainComponent.h"
 
+#include "core/ImportPlanner.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -172,7 +174,19 @@ class MainComponent::ChannelStrip final : public juce::Component,
 public:
     ChannelStrip(int channelIndex, MainComponent& ownerComponent) : index(channelIndex), owner(ownerComponent)
     {
-        inputLabel.setText("INPUT", juce::dontSendNotification);
+        nameEditor.setText(juce::String(index).paddedLeft('0', 2), juce::dontSendNotification);
+        nameEditor.setJustificationType(juce::Justification::centred);
+        nameEditor.setColour(juce::Label::textColourId, text);
+        nameEditor.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.35f));
+        nameEditor.setEditable(true, true, false);
+        nameEditor.onTextChange = [this]
+        {
+            const std::lock_guard<std::mutex> lock(owner.trackMutex);
+            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).name = nameEditor.getText().toStdString();
+        };
+        addAndMakeVisible(nameEditor);
+
+        inputLabel.setText("IN", juce::dontSendNotification);
         inputLabel.setJustificationType(juce::Justification::centred);
         inputLabel.setColour(juce::Label::textColourId, text);
         addAndMakeVisible(inputLabel);
@@ -200,6 +214,34 @@ public:
             owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setInputGainDb(static_cast<float>(inputGain.getValue()));
         };
         addAndMakeVisible(inputGain);
+
+        fader.setSliderStyle(juce::Slider::LinearVertical);
+        fader.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        fader.setRange(geilalizer::core::kFaderGainMinDb, geilalizer::core::kFaderGainMaxDb, 0.1);
+        fader.setValue(geilalizer::core::kDefaultFaderGainDb, juce::dontSendNotification);
+        fader.onValueChange = [this]
+        {
+            const std::lock_guard<std::mutex> lock(owner.trackMutex);
+            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setFaderGainDb(static_cast<float>(fader.getValue()));
+        };
+        addAndMakeVisible(fader);
+
+        pan.setSliderStyle(juce::Slider::LinearHorizontal);
+        pan.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        pan.setRange(-1.0, 1.0, 0.01);
+        pan.setValue(0.0, juce::dontSendNotification);
+        pan.onValueChange = [this]
+        {
+            const std::lock_guard<std::mutex> lock(owner.trackMutex);
+            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setPan(static_cast<float>(pan.getValue()));
+        };
+        addAndMakeVisible(pan);
+
+        clearButton.setButtonText("CLR");
+        clearButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff282828 });
+        clearButton.setColour(juce::TextButton::textColourOffId, muted);
+        clearButton.onClick = [this] { owner.clearChannel(static_cast<std::size_t>(index - 1)); };
+        addAndMakeVisible(clearButton);
     }
 
     bool isInterestedInFileDrag(const juce::StringArray&) override { return true; }
@@ -235,6 +277,21 @@ public:
         inputGain.setValue(db, juce::dontSendNotification);
     }
 
+    void setFaderValue(float db)
+    {
+        fader.setValue(db, juce::dontSendNotification);
+    }
+
+    void setPanValue(float value)
+    {
+        pan.setValue(value, juce::dontSendNotification);
+    }
+
+    void setNameText(const juce::String& name)
+    {
+        nameEditor.setText(name, juce::dontSendNotification);
+    }
+
     void paint(juce::Graphics& g) override
     {
         auto area = getLocalBounds();
@@ -242,10 +299,9 @@ public:
 
         g.setColour(text);
         g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
-        g.drawText(juce::String(index).paddedLeft('0', 2), area.removeFromTop(20), juce::Justification::centred);
 
         auto meterArea = juce::Rectangle<int>(7, 30, 13, 94);
-        drawLedMeter(g, meterArea, loaded ? peakToSegments(std::max(0.08f, meterPeak)) : peakToSegments(meterPeak), false);
+        drawLedMeter(g, meterArea, peakToSegments(meterPeak), false);
 
         g.setColour(muted);
         g.setFont(juce::FontOptions(9.0f));
@@ -264,9 +320,13 @@ public:
 
     void resized() override
     {
-        inputLabel.setBounds(22, 64, getWidth() - 26, 16);
-        inputGain.setBounds(20, 80, getWidth() - 24, 58);
-        armButton.setBounds(20, getHeight() - 31, getWidth() - 34, 22);
+        nameEditor.setBounds(24, 6, getWidth() - 30, 18);
+        inputLabel.setBounds(22, 29, 26, 14);
+        inputGain.setBounds(20, 43, 42, 46);
+        fader.setBounds(getWidth() - 24, 28, 18, 82);
+        pan.setBounds(24, 102, getWidth() - 34, 16);
+        armButton.setBounds(20, getHeight() - 49, getWidth() - 34, 20);
+        clearButton.setBounds(20, getHeight() - 25, getWidth() - 34, 18);
     }
 
 private:
@@ -275,9 +335,13 @@ private:
     bool dragging = false;
     bool loaded = false;
     float meterPeak = 0.0f;
+    juce::Label nameEditor;
     juce::Label inputLabel;
     juce::Slider inputGain;
+    juce::Slider fader;
+    juce::Slider pan;
     juce::TextButton armButton;
+    juce::TextButton clearButton;
 };
 
 class MainComponent::ExportSettingsComponent final : public juce::Component
@@ -493,25 +557,44 @@ bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files)
 
 void MainComponent::filesDropped(const juce::StringArray& files, int, int)
 {
-    if (! files.isEmpty())
-        importFileToFirstAvailableChannel(juce::File(files[0]));
+    for (const auto& path : files)
+    {
+        if (! importFileToFirstAvailableChannel(juce::File(path)))
+            break;
+    }
 }
 
 bool MainComponent::importFileToFirstAvailableChannel(const juce::File& file)
 {
-    std::size_t channel = 0;
+    if (! file.existsAsFile())
     {
-        const std::lock_guard<std::mutex> lock(trackMutex);
-        for (std::size_t i = 0; i < trackBuffers.size(); ++i)
-        {
-            if (trackBuffers[i].empty())
-            {
-                channel = i;
-                break;
-            }
-        }
+        setStatus("Import failed: file not found.");
+        return false;
     }
-    return importFileToChannel(file, channel);
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (reader == nullptr)
+    {
+        setStatus("Import failed: unsupported format.");
+        return false;
+    }
+
+    const auto channelsNeeded = static_cast<std::size_t>(std::min<int>(2, static_cast<int>(reader->numChannels)));
+    if (channelsNeeded == 0)
+    {
+        setStatus("Import failed: file has no readable audio channels.");
+        return false;
+    }
+
+    const auto placement = geilalizer::core::findFirstContiguousFreeChannels(snapshotOccupiedChannels(), channelsNeeded);
+    if (! placement.has_value())
+    {
+        setStatus(channelsNeeded > 1 ? "Stereo import needs two adjacent free mono tracks."
+                                     : "Import failed: all 24 mono tracks are occupied.");
+        return false;
+    }
+
+    return importFileToChannel(file, *placement);
 }
 
 bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firstChannelIndex)
@@ -537,9 +620,17 @@ bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firs
     }
 
     const int channelsToRead = std::min<int>(2, static_cast<int>(reader->numChannels));
-    if (channelsToRead > 1 && firstChannelIndex + 1 >= trackBuffers.size())
+    if (channelsToRead <= 0)
     {
-        setStatus("Stereo-Import braucht zwei freie Mono-Kanäle.");
+        setStatus("Import failed: file has no readable audio channels.");
+        return false;
+    }
+
+    const auto channelsNeeded = static_cast<std::size_t>(channelsToRead);
+    if (! geilalizer::core::canImportAtChannel(snapshotOccupiedChannels(), firstChannelIndex, channelsNeeded))
+    {
+        setStatus(channelsToRead > 1 ? "Stereo import needs two adjacent empty mono tracks. Clear tracks first."
+                                     : "Import target track is occupied. Clear it first.");
         return false;
     }
 
@@ -567,6 +658,33 @@ bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firs
     refreshChannelVisuals();
     repaint();
     return true;
+}
+
+std::array<bool, MainComponent::channelCount> MainComponent::snapshotOccupiedChannels() const
+{
+    std::array<bool, channelCount> occupied {};
+    const std::lock_guard<std::mutex> lock(trackMutex);
+    for (std::size_t i = 0; i < trackBuffers.size(); ++i)
+        occupied[i] = ! trackBuffers[i].empty() || audioEngine.session().channel(i).hasAudioFile;
+    return occupied;
+}
+
+void MainComponent::clearChannel(std::size_t channelIndex)
+{
+    if (channelIndex >= trackBuffers.size())
+        return;
+
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        trackBuffers[channelIndex].clear();
+        auto& state = audioEngine.session().channel(channelIndex);
+        state.clearLoadedAudioFile();
+        state.armed = false;
+    }
+
+    setStatus("Track " + juce::String(static_cast<int>(channelIndex + 1)) + " cleared.");
+    refreshChannelVisuals();
+    repaint();
 }
 
 void MainComponent::play()
@@ -743,6 +861,9 @@ void MainComponent::refreshChannelVisuals()
         channels[i]->setLoaded(state.hasAudioFile);
         channels[i]->setArmState(state.armed);
         channels[i]->setInputGainValue(state.inputGainDb);
+        channels[i]->setFaderValue(state.faderGainDb);
+        channels[i]->setPanValue(state.pan);
+        channels[i]->setNameText(juce::String(state.name));
         channels[i]->setMeterPeak(state.meterPeak);
     }
 }

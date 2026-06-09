@@ -1,6 +1,8 @@
 #include "core/AudioEngine.h"
+#include "core/ImportPlanner.h"
 #include "core/SessionState.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <vector>
@@ -8,6 +10,24 @@
 int main()
 {
     using namespace geilalizer;
+
+    std::array<bool, core::kMaxMonoChannels> occupied {};
+    assert(core::findFirstContiguousFreeChannels(occupied, 1) == 0);
+    assert(core::findFirstContiguousFreeChannels(occupied, 2) == 0);
+
+    occupied[0] = true;
+    occupied[2] = true;
+    assert(core::findFirstContiguousFreeChannels(occupied, 2) == 3);
+
+    occupied.fill(true);
+    assert(!core::findFirstContiguousFreeChannels(occupied, 1).has_value());
+    assert(!core::findFirstContiguousFreeChannels(occupied, 2).has_value());
+
+    occupied.fill(false);
+    occupied[5] = true;
+    assert(core::canImportAtChannel(occupied, 4, 1));
+    assert(!core::canImportAtChannel(occupied, 4, 2));
+    assert(!core::canImportAtChannel(occupied, core::kMaxMonoChannels - 1, 2));
 
     core::SessionState session;
     auto& channel = session.channel(0);

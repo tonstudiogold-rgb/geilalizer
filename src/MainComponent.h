@@ -42,6 +42,8 @@ private:
 
     bool importFileToChannel(const juce::File& file, std::size_t firstChannelIndex);
     bool importFileToFirstAvailableChannel(const juce::File& file);
+    void clearChannel(std::size_t channelIndex);
+    std::array<bool, channelCount> snapshotOccupiedChannels() const;
     void play();
     void stop();
     void rewind();
