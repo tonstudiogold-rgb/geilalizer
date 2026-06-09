@@ -15,6 +15,10 @@ struct ChannelState
     std::size_t index = 0;
     std::string name = "1";
     bool armed = false;
+    bool inputAssigned = false;
+    int inputChannelIndex = -1;
+    bool muted = false;
+    bool solo = false;
     bool faderVisible = true;
     float inputGainDb = kDefaultInputGainDb;
     int preampIndex = 5; // 0..10 stepped hidden 1073 IR selector; default = Neve 55.wav.

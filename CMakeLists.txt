@@ -178,6 +178,9 @@ add_executable(SignalChainProbeSmoke
     src/dsp/HiddenPostFaderIrAdapter.cpp
     src/dsp/MachineProcessor.cpp)
 
+add_executable(TapeMachineBehavior
+    tests/TapeMachineBehavior.cpp)
+
 if(GEILALIZER_BUILD_JUCE_APP)
     add_executable(OfflineRenderSlice
         tests/OfflineRenderSlice.cpp
@@ -199,6 +202,8 @@ target_include_directories(FunctionalSmoke PRIVATE src)
 target_compile_features(FunctionalSmoke PRIVATE cxx_std_20)
 target_include_directories(SignalChainProbeSmoke PRIVATE src)
 target_compile_features(SignalChainProbeSmoke PRIVATE cxx_std_20)
+target_include_directories(TapeMachineBehavior PRIVATE src)
+target_compile_features(TapeMachineBehavior PRIVATE cxx_std_20)
 if(GEILALIZER_BUILD_JUCE_APP)
     target_include_directories(OfflineRenderSlice PRIVATE src)
     target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
@@ -246,6 +251,7 @@ add_test(NAME NamAdapterSmoke COMMAND NamAdapterSmoke)
 add_test(NAME ProductE2E COMMAND ProductE2E)
 add_test(NAME FunctionalSmoke COMMAND FunctionalSmoke)
 add_test(NAME SignalChainProbeSmoke COMMAND SignalChainProbeSmoke)
+add_test(NAME TapeMachineBehavior COMMAND TapeMachineBehavior)
 if(GEILALIZER_BUILD_JUCE_APP)
     add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
 endif()

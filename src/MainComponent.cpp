@@ -232,20 +232,50 @@ public:
         };
         addAndMakeVisible(nameEditor);
 
-        inputLabel.setText("IN", juce::dontSendNotification);
+        inputLabel.setText("INPUT", juce::dontSendNotification);
         inputLabel.setJustificationType(juce::Justification::centred);
         inputLabel.setColour(juce::Label::textColourId, text);
         addAndMakeVisible(inputLabel);
 
-        armButton.setClickingTogglesState(true);
+        inputSelect.addItem("--", 1);
+        for (int i = 1; i <= channelCount; ++i)
+            inputSelect.addItem("IN " + juce::String(i), i + 1);
+        inputSelect.setSelectedId(1, juce::dontSendNotification);
+        inputSelect.setColour(juce::ComboBox::textColourId, text);
+        inputSelect.setColour(juce::ComboBox::backgroundColourId, juce::Colours::black.withAlpha(0.45f));
+        inputSelect.onChange = [this]
+        {
+            const int selected = inputSelect.getSelectedId() - 2;
+            geilalizer::core::TapeMachineSnapshot snap;
+            {
+                const std::lock_guard<std::mutex> lock(owner.trackMutex);
+                snap = owner.tapeMachine.setInput(index - 1, selected);
+                auto& state = owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1));
+                state.inputAssigned = selected >= 0;
+                state.inputChannelIndex = selected;
+                if (! state.inputAssigned)
+                    state.armed = false;
+            }
+            owner.applyTapeSnapshot(snap);
+            owner.refreshChannelVisuals();
+        };
+        addAndMakeVisible(inputSelect);
+
+        armButton.setClickingTogglesState(false);
         armButton.setButtonText("ARM");
         armButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff540b0b });
         armButton.setColour(juce::TextButton::buttonOnColourId, red);
         armButton.setColour(juce::TextButton::textColourOffId, text);
         armButton.onClick = [this]
         {
-            const std::lock_guard<std::mutex> lock(owner.trackMutex);
-            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).armed = armButton.getToggleState();
+            geilalizer::core::TapeMachineSnapshot snap;
+            {
+                const std::lock_guard<std::mutex> lock(owner.trackMutex);
+                snap = owner.tapeMachine.toggleArm(index - 1);
+                owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).armed = snap.tracks[static_cast<std::size_t>(index - 1)].armed;
+            }
+            owner.applyTapeSnapshot(snap);
+            owner.refreshChannelVisuals();
         };
         addAndMakeVisible(armButton);
 
@@ -283,11 +313,41 @@ public:
         };
         addAndMakeVisible(pan);
 
-        clearButton.setButtonText("CLR");
-        clearButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff282828 });
-        clearButton.setColour(juce::TextButton::textColourOffId, muted);
-        clearButton.onClick = [this] { owner.clearChannel(static_cast<std::size_t>(index - 1)); };
-        addAndMakeVisible(clearButton);
+        muteButton.setButtonText("MUTE");
+        muteButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff333333 });
+        muteButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour { 0xff666666 });
+        muteButton.setColour(juce::TextButton::textColourOffId, muted);
+        muteButton.onClick = [this]
+        {
+            geilalizer::core::TapeMachineSnapshot snap;
+            {
+                const std::lock_guard<std::mutex> lock(owner.trackMutex);
+                snap = owner.tapeMachine.toggleMute(index - 1);
+                auto& state = owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1));
+                state.muted = snap.tracks[static_cast<std::size_t>(index - 1)].muted;
+            }
+            owner.applyTapeSnapshot(snap);
+            owner.refreshChannelVisuals();
+        };
+        addAndMakeVisible(muteButton);
+
+        soloButton.setButtonText("SOLO");
+        soloButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff3b3112 });
+        soloButton.setColour(juce::TextButton::buttonOnColourId, accent);
+        soloButton.setColour(juce::TextButton::textColourOffId, muted);
+        soloButton.onClick = [this]
+        {
+            geilalizer::core::TapeMachineSnapshot snap;
+            {
+                const std::lock_guard<std::mutex> lock(owner.trackMutex);
+                snap = owner.tapeMachine.toggleSolo(index - 1);
+                auto& state = owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1));
+                state.solo = snap.tracks[static_cast<std::size_t>(index - 1)].solo;
+            }
+            owner.applyTapeSnapshot(snap);
+            owner.refreshChannelVisuals();
+        };
+        addAndMakeVisible(soloButton);
     }
 
     bool isInterestedInFileDrag(const juce::StringArray&) override { return true; }
@@ -331,6 +391,17 @@ public:
     void setPanValue(float value)
     {
         pan.setValue(value, juce::dontSendNotification);
+    }
+
+    void setInputSelection(int selectedZeroBasedInput)
+    {
+        inputSelect.setSelectedId(selectedZeroBasedInput >= 0 ? selectedZeroBasedInput + 2 : 1, juce::dontSendNotification);
+    }
+
+    void setMuteSoloState(bool muted, bool solo)
+    {
+        muteButton.setToggleState(muted, juce::dontSendNotification);
+        soloButton.setToggleState(solo, juce::dontSendNotification);
     }
 
     void setNameText(const juce::String& name)
@@ -381,12 +452,14 @@ public:
     void resized() override
     {
         nameEditor.setBounds(24, 6, getWidth() - 30, 18);
-        inputLabel.setBounds(22, 29, 26, 14);
-        inputGain.setBounds(20, 43, 42, 46);
-        fader.setBounds(getWidth() - 24, 28, 18, 82);
-        pan.setBounds(24, 102, getWidth() - 34, 16);
-        armButton.setBounds(20, getHeight() - 49, getWidth() - 34, 20);
-        clearButton.setBounds(20, getHeight() - 25, getWidth() - 34, 18);
+        inputLabel.setBounds(14, 27, getWidth() - 20, 12);
+        inputSelect.setBounds(10, 40, getWidth() - 16, 20);
+        inputGain.setBounds(20, 62, 42, 42);
+        fader.setBounds(getWidth() - 24, 48, 18, 66);
+        pan.setBounds(24, 108, getWidth() - 34, 14);
+        armButton.setBounds(8, getHeight() - 52, getWidth() - 16, 18);
+        muteButton.setBounds(8, getHeight() - 30, (getWidth() - 20) / 2, 18);
+        soloButton.setBounds(12 + (getWidth() - 20) / 2, getHeight() - 30, (getWidth() - 20) / 2, 18);
     }
 
 private:
@@ -397,11 +470,13 @@ private:
     geilalizer::core::LevelMeter meter;
     juce::Label nameEditor;
     juce::Label inputLabel;
+    juce::ComboBox inputSelect;
     juce::Slider inputGain;
     juce::Slider fader;
     juce::Slider pan;
     juce::TextButton armButton;
-    juce::TextButton clearButton;
+    juce::TextButton muteButton;
+    juce::TextButton soloButton;
 };
 
 class MainComponent::ExportSettingsComponent final : public juce::Component
@@ -443,7 +518,7 @@ MainComponent::MainComponent()
     formatManager.registerBasicFormats();
     audioBlockInputs.resize(channelCount);
 
-    titleLabel.setText("24-TRACK STANDALONE GEILALIZER – TAPE MACHINE", juce::dontSendNotification);
+    titleLabel.setText("24-TRACK STANDALONE GEILALIZER - TAPE MACHINE", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
     titleLabel.setJustificationType(juce::Justification::centredLeft);
     titleLabel.setColour(juce::Label::textColourId, text);
@@ -453,10 +528,14 @@ MainComponent::MainComponent()
     rewButton.setButtonText("REW");
     stopButton.setButtonText("STOP");
     playButton.setButtonText("PLAY");
+    recButton.setButtonText("REC");
+    undoButton.setButtonText("UNDO");
     exportButton.setButtonText("RENDER");
+    recButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff540b0b });
+    recButton.setColour(juce::TextButton::buttonOnColourId, red);
     playButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff116b12 });
     exportButton.setColour(juce::TextButton::buttonColourId, juce::Colour { 0xff5b5b5b });
-    for (auto* button : { &loadButton, &rewButton, &playButton, &stopButton, &exportButton })
+    for (auto* button : { &loadButton, &rewButton, &playButton, &stopButton, &recButton, &undoButton, &exportButton })
         addAndMakeVisible(button);
 
     loadButton.onClick = [this]
@@ -473,12 +552,30 @@ MainComponent::MainComponent()
     rewButton.onClick = [this] { rewind(); };
     stopButton.onClick = [this] { stop(); };
     playButton.onClick = [this] { play(); };
+    recButton.onClick = [this] { toggleRecord(); };
+    undoButton.onClick = [this] { undoLastRecording(); };
     exportButton.onClick = [this] { showExportDialog(); };
 
     channelViewport.setViewedComponent(&channelContainer, false);
     channelViewport.setScrollBarsShown(false, true);
     channelViewport.setScrollOnDragMode(juce::Viewport::ScrollOnDragMode::all);
     addAndMakeVisible(channelViewport);
+
+    for (int bank = 0; bank < 3; ++bank)
+    {
+        auto& toggle = bankToggles[static_cast<std::size_t>(bank)];
+        toggle.setButtonText("BANK " + juce::String::charToString(static_cast<juce::juce_wchar>('A' + bank))
+                             + " | CH " + juce::String(bank * 8 + 1) + "-" + juce::String(bank * 8 + 8));
+        toggle.setToggleState(true, juce::dontSendNotification);
+        toggle.setColour(juce::ToggleButton::textColourId, text);
+        toggle.onClick = [this, bank]
+        {
+            bankOpen[static_cast<std::size_t>(bank)] = bankToggles[static_cast<std::size_t>(bank)].getToggleState();
+            resized();
+            repaint();
+        };
+        addAndMakeVisible(toggle);
+    }
 
     for (int i = 1; i <= channelCount; ++i)
     {
@@ -592,7 +689,8 @@ MainComponent::MainComponent()
     lf.setColour(juce::Label::textColourId, text);
 
     startTimerHz(30);
-    setAudioChannels(0, 2);
+    resized();
+    setAudioChannels(channelCount, 2);
 }
 
 MainComponent::~MainComponent()
@@ -614,13 +712,18 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     if (info.buffer == nullptr)
         return;
 
+    const int numSamples = info.numSamples;
+    std::vector<std::vector<float>> liveInputs(channelCount, std::vector<float>(static_cast<std::size_t>(numSamples), 0.0f));
+    const int availableInputChannels = std::min(channelCount, info.buffer->getNumChannels());
+    for (int ch = 0; ch < availableInputChannels; ++ch)
+        for (int i = 0; i < numSamples; ++i)
+            liveInputs[static_cast<std::size_t>(ch)][static_cast<std::size_t>(i)] = info.buffer->getSample(ch, info.startSample + i);
+
     info.clearActiveBufferRegion();
     if (! playing.load())
         return;
 
-    const int numSamples = info.numSamples;
     const auto startFrame = playheadFrame.load();
-    bool reachedEnd = false;
 
     {
         const std::lock_guard<std::mutex> lock(trackMutex);
@@ -631,6 +734,30 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 
         for (std::size_t ch = 0; ch < trackBuffers.size(); ++ch)
         {
+            auto& state = audioEngine.session().channel(ch);
+            const bool shouldRecord = recording.load() && state.armed && state.inputAssigned;
+            const int inputIndex = state.inputChannelIndex;
+            if (shouldRecord && inputIndex >= 0 && inputIndex < availableInputChannels)
+            {
+                auto& dest = trackBuffers[ch];
+                const auto writeEnd = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + numSamples));
+                if (dest.size() < writeEnd)
+                    dest.resize(writeEnd, 0.0f);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    const auto frame = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + i));
+                    const auto sample = liveInputs[static_cast<std::size_t>(inputIndex)][static_cast<std::size_t>(i)];
+                    dest[frame] = sample;
+                    audioBlockInputs[ch][static_cast<std::size_t>(i)] = sample;
+                }
+                state.setLoadedAudioFile("live-input-" + std::to_string(inputIndex + 1), inputIndex, dest.size());
+                state.inputAssigned = true;
+                state.armed = true;
+                continue;
+            }
+
+            if (! tapeMachine.shouldMonitorTrack(static_cast<int>(ch)))
+                continue;
             const auto& src = trackBuffers[ch];
             if (src.empty())
                 continue;
@@ -655,11 +782,12 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         if (channelsToWrite > 1) info.buffer->setSample(1, info.startSample + sample, right);
     }
 
-    const auto nextFrame = startFrame + numSamples;
-    playheadFrame.store(nextFrame);
-    reachedEnd = maxLoadedFrames() > 0 && static_cast<std::size_t>(nextFrame) >= maxLoadedFrames();
-    if (reachedEnd)
-        playing.store(false);
+    geilalizer::core::TapeMachineSnapshot snap;
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        snap = tapeMachine.advance(numSamples);
+    }
+    playheadFrame.store(snap.playheadFrame);
 }
 
 void MainComponent::releaseResources()
@@ -767,7 +895,9 @@ bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firs
             dest = geilalizer::core::resampleLinear(imported, reader->sampleRate, deviceSampleRate);
             auto& state = audioEngine.session().channel(firstChannelIndex + static_cast<std::size_t>(ch));
             state.setLoadedAudioFile(file.getFullPathName().toStdString(), ch, dest.size());
-            state.armed = true;
+            state.inputAssigned = false;
+            state.inputChannelIndex = -1;
+            state.armed = false;
         }
     }
 
@@ -808,32 +938,106 @@ void MainComponent::clearChannel(std::size_t channelIndex)
 
 void MainComponent::play()
 {
-    if (maxLoadedFrames() == 0)
+    const auto loadedFrames = static_cast<std::int64_t>(maxLoadedFrames());
+    geilalizer::core::TapeMachineSnapshot snap;
     {
-        setStatus("Nothing loaded – import audio with LOAD or drag and drop first.");
-        return;
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        snap = tapeMachine.play(loadedFrames);
     }
-    if (static_cast<std::size_t>(std::max<std::int64_t>(0, playheadFrame.load())) >= maxLoadedFrames())
-        rewind();
-    playing.store(true);
-    setStatus("PLAY – fixed tape-machine signal path is running.");
+    applyTapeSnapshot(snap);
 }
 
 void MainComponent::stop()
 {
-    playing.store(false);
-    setStatus("STOP");
+    geilalizer::core::TapeMachineSnapshot snap;
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        snap = tapeMachine.stop();
+    }
+    if (snap.lastRecording.has_value())
+        pendingUndoSpan = snap.lastRecording;
+    applyTapeSnapshot(snap);
 }
 
 void MainComponent::rewind()
 {
     playing.store(false);
+    recording.store(false);
     playheadFrame.store(0);
     {
         const std::lock_guard<std::mutex> lock(trackMutex);
         audioEngine.reset();
+        tapeMachine.stop();
+        tapeMachine.stop();
     }
-    setStatus("REW – Position auf Start zurückgesetzt.");
+    setStatus(juce::String::fromUTF8("REW - Position auf Start zur\303\274ckgesetzt."));
+}
+
+void MainComponent::toggleRecord()
+{
+    geilalizer::core::TapeMachineSnapshot snap;
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        if (! recording.load())
+            undoTrackBuffers = trackBuffers;
+        snap = tapeMachine.toggleRecord();
+    }
+    if (snap.lastRecording.has_value())
+        pendingUndoSpan = snap.lastRecording;
+    applyTapeSnapshot(snap);
+}
+
+void MainComponent::undoLastRecording()
+{
+    if (pendingUndoSpan.has_value())
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        trackBuffers = undoTrackBuffers;
+        for (int i = 0; i < channelCount; ++i)
+            audioEngine.session().channel(static_cast<std::size_t>(i)).lengthFrames = trackBuffers[static_cast<std::size_t>(i)].size();
+    }
+    geilalizer::core::TapeMachineSnapshot snap;
+    {
+        const std::lock_guard<std::mutex> lock(trackMutex);
+        snap = tapeMachine.undoLastRecording();
+    }
+    pendingUndoSpan.reset();
+    applyTapeSnapshot(snap);
+    refreshChannelVisuals();
+}
+
+void MainComponent::applyTapeSnapshot(const geilalizer::core::TapeMachineSnapshot& snapshot)
+{
+    playing.store(snapshot.transport == geilalizer::core::TransportState::Playing
+                  || snapshot.transport == geilalizer::core::TransportState::Recording);
+    recording.store(snapshot.transport == geilalizer::core::TransportState::Recording);
+    playheadFrame.store(snapshot.playheadFrame);
+    recButton.setToggleState(snapshot.recordEnabled || snapshot.transport == geilalizer::core::TransportState::Recording, juce::dontSendNotification);
+    playButton.setToggleState(snapshot.transport == geilalizer::core::TransportState::Playing
+                              || snapshot.transport == geilalizer::core::TransportState::Recording, juce::dontSendNotification);
+    undoButton.setEnabled(snapshot.canUndo || pendingUndoSpan.has_value());
+    setStatus(juce::String::fromUTF8(snapshot.message.c_str()));
+    repaint();
+}
+
+void MainComponent::overwriteRecordedRange(const geilalizer::core::TapeRecordingSpan& span)
+{
+    const auto start = static_cast<std::size_t>(std::max<std::int64_t>(0, span.startFrame));
+    const auto end = static_cast<std::size_t>(std::max<std::int64_t>(span.startFrame, span.endFrame));
+    if (end <= start)
+        return;
+    for (const int trackIndex : span.tracks)
+    {
+        if (trackIndex < 0 || trackIndex >= channelCount)
+            continue;
+        auto& dest = trackBuffers[static_cast<std::size_t>(trackIndex)];
+        if (dest.size() < end)
+            dest.resize(end, 0.0f);
+        auto& state = audioEngine.session().channel(static_cast<std::size_t>(trackIndex));
+        state.setLoadedAudioFile("live-input-" + std::to_string(state.inputChannelIndex + 1), state.inputChannelIndex, dest.size());
+        state.inputAssigned = true;
+        state.armed = true;
+    }
 }
 
 std::vector<std::vector<float>> MainComponent::snapshotTrackBuffers() const
@@ -917,7 +1121,7 @@ void MainComponent::renderToFileAsync(const juce::File& outputFile, double sampl
         sessionCopy = audioEngine.session();
     }
 
-    setStatus("Rendering…");
+    setStatus("Rendering...");
     exportButton.setEnabled(false);
     const juce::Component::SafePointer<MainComponent> safeThis(this);
     std::thread([safeThis, outputFile, sampleRate, bitDepth, startFrame, numFrames, fullLength, buffers, sessionCopy]() mutable
@@ -1011,6 +1215,8 @@ void MainComponent::refreshChannelVisuals()
         channels[i]->setInputGainValue(state.inputGainDb);
         channels[i]->setFaderValue(state.faderGainDb);
         channels[i]->setPanValue(state.pan);
+        channels[i]->setInputSelection(state.inputAssigned ? state.inputChannelIndex : -1);
+        channels[i]->setMuteSoloState(state.muted, state.solo);
         channels[i]->setNameText(juce::String(state.name));
         channels[i]->setMeterPeak(state.meterPeak);
     }
@@ -1024,7 +1230,8 @@ void MainComponent::refreshMasterVisuals()
         masterMeter->setLevels(master.meterLeftPeak, master.meterRightPeak);
     limiterToggle.setToggleState(master.limiterEnabled, juce::dontSendNotification);
     outputTrim.setValue(master.outputTrimDb, juce::dontSendNotification);
-    limiterActivityLabel.setText((playing.load() ? "PLAY" : "STOP") + juce::String("  |  ")
+    const juce::String mode = recording.load() ? "REC" : (playing.load() ? "PLAY" : "STOP");
+    limiterActivityLabel.setText(mode + juce::String("  |  ")
                                  + (master.limiterActive ? "LIMITER ACTIVE" : "LIMITER READY")
                                  + "  |  15 IPS", juce::dontSendNotification);
 }
@@ -1066,12 +1273,13 @@ void MainComponent::paint(juce::Graphics& g)
     g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
     g.drawText("15 IPS", transportPanel.getRight() - 72, transportPanel.getY() + 42, 50, 18, juce::Justification::centred);
 
-    auto btnRow = juce::Rectangle<int>(transportPanel.getX() + 29, transportPanel.getBottom() - 36, 302, 26);
-    drawTransportButton(g, btnRow.removeFromLeft(48), "LOAD"); btnRow.removeFromLeft(7);
-    drawTransportButton(g, btnRow.removeFromLeft(48), "REW"); btnRow.removeFromLeft(7);
-    drawTransportButton(g, btnRow.removeFromLeft(48), "STOP"); btnRow.removeFromLeft(7);
-    drawTransportButton(g, btnRow.removeFromLeft(48), "PLAY", juce::Colour { 0xff128111 }); btnRow.removeFromLeft(7);
-    drawTransportButton(g, btnRow.removeFromLeft(48), "READY", red.darker(0.2f));
+    auto btnRow = juce::Rectangle<int>(transportPanel.getX() + 12, transportPanel.getBottom() - 36, 336, 26);
+    drawTransportButton(g, btnRow.removeFromLeft(45), "LOAD"); btnRow.removeFromLeft(6);
+    drawTransportButton(g, btnRow.removeFromLeft(45), "REW"); btnRow.removeFromLeft(6);
+    drawTransportButton(g, btnRow.removeFromLeft(45), "STOP"); btnRow.removeFromLeft(6);
+    drawTransportButton(g, btnRow.removeFromLeft(45), "PLAY", juce::Colour { 0xff128111 }); btnRow.removeFromLeft(6);
+    drawTransportButton(g, btnRow.removeFromLeft(45), "REC", recording.load() ? red : red.darker(0.2f)); btnRow.removeFromLeft(6);
+    drawTransportButton(g, btnRow.removeFromLeft(54), "UNDO");
 
     auto machine = juce::Rectangle<int>(deck.getCentreX() - 170, deck.getBottom() - 70, 340, 54);
     g.setGradientFill(juce::ColourGradient(juce::Colour { 0xff9d9284 }, machine.getTopLeft().toFloat(),
@@ -1104,7 +1312,7 @@ void MainComponent::paint(juce::Graphics& g)
     drawPanel(g, perChannel, "CHANNEL STRUCTURE (PER TRACK)");
     auto flow = perChannel.reduced(18, 34);
     const juce::StringArray channelTitles { "AUDIO FILE", "INPUT", "PREAMP", "CHANNEL", "TAPE HEAD", "FADER", "CHANNEL OUT" };
-    const juce::StringArray channelSubs { "Drag / Drop WAV", "Gain staging", "Input iron", "Line amplifier", "15 IPS response", "Post-tape level", "24 → Mixbus" };
+    const juce::StringArray channelSubs { "Drag / Drop WAV", "Gain staging", "Input iron", "Line amplifier", "15 IPS response", "Post-tape level", "24 -> Mixbus" };
     for (int i = 0; i < channelTitles.size(); ++i)
     {
         auto block = flow.removeFromLeft(i == 5 ? 72 : 136);
@@ -1118,7 +1326,7 @@ void MainComponent::paint(juce::Graphics& g)
     drawPanel(g, mixbus, "MIXBUS ARCHITECTURE");
     auto mixFlow = mixbus.reduced(18, 34);
     const juce::StringArray mixTitles { "CHANNEL OUTPUTS", "MIXBUS SUMMING", "BUS DRIVE", "TAPE RETURN", "LIMITER", "CONVERTER", "MASTER OUTPUT" };
-    const juce::StringArray mixSubs { "1–24", "Analog summing", "Drive color", "15 IPS", "Protection", "A/D/A finish", "L / R" };
+    const juce::StringArray mixSubs { "1-24", "Analog summing", "Drive color", "15 IPS", "Protection", "A/D/A finish", "L / R" };
     for (int i = 0; i < mixTitles.size(); ++i)
     {
         auto block = mixFlow.removeFromLeft(i == 0 ? 140 : 130);
@@ -1133,12 +1341,13 @@ void MainComponent::paint(juce::Graphics& g)
     auto b = bottom.reduced(18, 34);
     auto transport = b.removeFromLeft(320);
     drawPanel(g, transport, "TRANSPORT");
-    auto tr = transport.reduced(14, 38);
-    drawTransportButton(g, tr.removeFromLeft(54), "LOAD"); tr.removeFromLeft(8);
-    drawTransportButton(g, tr.removeFromLeft(54), "REW"); tr.removeFromLeft(8);
-    drawTransportButton(g, tr.removeFromLeft(54), "STOP"); tr.removeFromLeft(8);
-    drawTransportButton(g, tr.removeFromLeft(54), "PLAY", juce::Colour { 0xff128111 }); tr.removeFromLeft(8);
-    drawTransportButton(g, tr.removeFromLeft(54), "READY", red.darker(0.2f));
+    auto tr = transport.reduced(10, 38);
+    drawTransportButton(g, tr.removeFromLeft(45), "LOAD"); tr.removeFromLeft(5);
+    drawTransportButton(g, tr.removeFromLeft(42), "REW"); tr.removeFromLeft(5);
+    drawTransportButton(g, tr.removeFromLeft(45), "STOP"); tr.removeFromLeft(5);
+    drawTransportButton(g, tr.removeFromLeft(45), "PLAY", juce::Colour { 0xff128111 }); tr.removeFromLeft(5);
+    drawTransportButton(g, tr.removeFromLeft(42), "REC", recording.load() ? red : red.darker(0.2f)); tr.removeFromLeft(5);
+    drawTransportButton(g, tr.removeFromLeft(52), "UNDO");
 
     b.removeFromLeft(18);
     auto time = b.removeFromLeft(170);
@@ -1166,7 +1375,7 @@ void MainComponent::paint(juce::Graphics& g)
     g.drawText("RATE     " + renderRate, render.reduced(14, 46).removeFromTop(18), juce::Justification::centredLeft);
     g.drawText("DEPTH    " + renderDepth, render.reduced(14, 64).removeFromTop(18), juce::Justification::centredLeft);
     const bool manualRangeClamped = ! renderFullSongToggle.getToggleState() && renderEndSeconds.getValue() <= renderStartSeconds.getValue();
-    const juce::String rangeText = renderFullSongToggle.getToggleState() ? "FULL SONG" : juce::String(renderStartSeconds.getValue(), 1) + "s → " + juce::String(renderEndSeconds.getValue(), 1) + "s" + (manualRangeClamped ? "  CLAMPED" : "");
+    const juce::String rangeText = renderFullSongToggle.getToggleState() ? "FULL SONG" : juce::String(renderStartSeconds.getValue(), 1) + "s -> " + juce::String(renderEndSeconds.getValue(), 1) + "s" + (manualRangeClamped ? "  CLAMPED" : "");
     g.setColour(manualRangeClamped ? accent : text);
     g.drawText("RANGE    " + rangeText, render.reduced(14, 82).removeFromTop(18), juce::Justification::centredLeft);
     g.setColour(text);
@@ -1201,24 +1410,42 @@ void MainComponent::resized()
     auto title = bounds.removeFromTop(32);
     titleLabel.setBounds(title.removeFromLeft(650));
 
+    if (channels.size() < channelCount)
+        return;
+
     bounds.removeFromTop(205);
     auto channelPanel = bounds.removeFromTop(392).reduced(16, 30);
     auto masterArea = channelPanel.removeFromRight(122);
     channelPanel.removeFromRight(8);
 
     channelViewport.setBounds(channelPanel);
-    constexpr int stripWidth = 76;
-    constexpr int stripHeight = 158;
+    constexpr int stripWidth = 82;
+    constexpr int stripHeight = 168;
     constexpr int stripGap = 7;
-    const int rowGap = 8;
-    const int cols = 12;
-    channelContainer.setBounds(0, 0, cols * (stripWidth + stripGap) + stripGap, stripHeight * 2 + rowGap + 2);
-    for (int i = 0; i < channels.size(); ++i)
+    constexpr int bankHeaderHeight = 26;
+    const int rowGap = 10;
+    const int cols = 8;
+    int y = 0;
+    for (int bank = 0; bank < 3; ++bank)
     {
-        const int row = i / cols;
-        const int col = i % cols;
-        channels[i]->setBounds(stripGap + col * (stripWidth + stripGap), row * (stripHeight + rowGap), stripWidth, stripHeight);
+        bankToggles[static_cast<std::size_t>(bank)].setBounds(channelPanel.getX(), channelPanel.getY() + y, channelPanel.getWidth() - 18, bankHeaderHeight);
+        y += bankHeaderHeight;
+        if (! bankOpen[static_cast<std::size_t>(bank)])
+        {
+            for (int i = bank * 8; i < bank * 8 + 8; ++i)
+                channels[i]->setVisible(false);
+            y += 4;
+            continue;
+        }
+        for (int i = bank * 8; i < bank * 8 + 8; ++i)
+        {
+            const int col = i % cols;
+            channels[i]->setVisible(true);
+            channels[i]->setBounds(stripGap + col * (stripWidth + stripGap), y, stripWidth, stripHeight);
+        }
+        y += stripHeight + rowGap;
     }
+    channelContainer.setBounds(0, 0, cols * (stripWidth + stripGap) + stripGap, y + 2);
 
     masterGroup.setBounds(masterArea);
     auto m = masterArea.reduced(12, 26);
@@ -1245,14 +1472,18 @@ void MainComponent::resized()
     limiterToggle.setBounds(m.removeFromTop(22));
     limiterActivityLabel.setBounds(m.removeFromTop(42));
 
-    auto deckArea = juce::Rectangle<int>(getWidth() / 2 - 180, 92, 410, 28);
-    loadButton.setBounds(deckArea.removeFromLeft(66));
+    auto deckArea = juce::Rectangle<int>(getWidth() / 2 - 260, 92, 560, 28);
+    loadButton.setBounds(deckArea.removeFromLeft(62));
     deckArea.removeFromLeft(6);
-    rewButton.setBounds(deckArea.removeFromLeft(55));
+    rewButton.setBounds(deckArea.removeFromLeft(52));
     deckArea.removeFromLeft(6);
     stopButton.setBounds(deckArea.removeFromLeft(55));
     deckArea.removeFromLeft(6);
     playButton.setBounds(deckArea.removeFromLeft(55));
+    deckArea.removeFromLeft(6);
+    recButton.setBounds(deckArea.removeFromLeft(55));
+    deckArea.removeFromLeft(6);
+    undoButton.setBounds(deckArea.removeFromLeft(68));
     deckArea.removeFromLeft(6);
     exportButton.setBounds(deckArea.removeFromLeft(88));
 }

@@ -2,6 +2,7 @@
 
 #include "core/AudioEngine.h"
 #include "core/RenderEngine.h"
+#include "core/TapeMachineState.h"
 
 #include <array>
 #include <atomic>
@@ -47,6 +48,10 @@ private:
     void play();
     void stop();
     void rewind();
+    void toggleRecord();
+    void undoLastRecording();
+    void applyTapeSnapshot(const geilalizer::core::TapeMachineSnapshot& snapshot);
+    void overwriteRecordedRange(const geilalizer::core::TapeRecordingSpan& span);
     void updateTransportStatus();
     void renderToFileAsync(const juce::File& outputFile, double sampleRate, int bitDepth,
                            std::size_t startFrame, std::size_t numFrames, bool fullLength);
@@ -62,11 +67,15 @@ private:
     juce::TextButton rewButton { "REW" };
     juce::TextButton playButton { "PLAY" };
     juce::TextButton stopButton { "STOP" };
+    juce::TextButton recButton { "REC" };
+    juce::TextButton undoButton { "UNDO" };
     juce::TextButton exportButton { "RENDER" };
     std::shared_ptr<juce::FileChooser> activeFileChooser;
 
     juce::Viewport channelViewport;
     juce::Component channelContainer;
+    std::array<juce::ToggleButton, 3> bankToggles;
+    std::array<bool, 3> bankOpen { true, true, true };
     juce::OwnedArray<ChannelStrip> channels;
 
     juce::GroupComponent masterGroup { {}, "Master" };
@@ -87,6 +96,7 @@ private:
 
     geilalizer::core::AudioEngine audioEngine;
     geilalizer::core::RenderEngine renderEngine;
+    geilalizer::core::TapeMachineState tapeMachine;
     juce::AudioFormatManager formatManager;
 
     mutable std::mutex trackMutex;
@@ -95,10 +105,13 @@ private:
     std::vector<float> audioBlockInterleaved;
 
     std::atomic<bool> playing { false };
+    std::atomic<bool> recording { false };
     std::atomic<std::int64_t> playheadFrame { 0 };
+    std::array<std::vector<float>, channelCount> undoTrackBuffers;
+    std::optional<geilalizer::core::TapeRecordingSpan> pendingUndoSpan;
     double deviceSampleRate = 44100.0;
     int deviceBlockSize = 512;
-    juce::String statusText { "Ready – drag WAV/AIFF/FLAC/MP3 onto a track or click RENDER." };
+    juce::String statusText { "Ready - drag WAV/AIFF/FLAC/MP3 onto a track or click RENDER." };
     juce::String projectName { "Geilalizer Session" };
     juce::CriticalSection statusLock;
 
