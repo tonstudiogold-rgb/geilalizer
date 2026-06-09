@@ -9,6 +9,8 @@
 #include "../core/SessionState.h"
 
 #include <array>
+#include <cstddef>
+#include <string>
 #include <vector>
 
 namespace geilalizer::dsp
@@ -30,6 +32,17 @@ public:
         std::array<float, core::kMaxMonoChannels> channelPeaks {};
     };
 
+    struct StageProbe
+    {
+        std::string name;
+        std::size_t frames = 0;
+        float beforePeak = 0.0f;
+        float afterPeak = 0.0f;
+        float deltaRms = 0.0f;
+
+        bool changed(float threshold = 1.0e-6f) const { return deltaRms > threshold; }
+    };
+
     void prepare(double sampleRate, int maxBlockSize);
     void reset();
 
@@ -48,9 +61,17 @@ public:
     HiddenPostFaderIrAdapter& postFaderIrAdapter() { return postFaderIrAdapter_; }
     HiddenMixbusIrAdapter& mixbusIrAdapter() { return mixbusIrAdapter_; }
     const ProcessMeters& lastMeters() const { return lastMeters_; }
+    void setStageProbeEnabled(bool enabled) { stageProbeEnabled_ = enabled; }
+    bool stageProbeEnabled() const { return stageProbeEnabled_; }
+    const std::vector<StageProbe>& lastStageProbes() const { return lastStageProbes_; }
 
 private:
     void processStereoNam(HiddenNamAdapter& adapter, std::vector<float>& interleavedStereo, std::size_t numFrames);
+    void clearStageProbes();
+    void recordMonoStageProbe(const std::string& name, const std::vector<float>& before,
+                              const float* after, std::size_t frames);
+    void recordStereoStageProbe(const std::string& name, const std::vector<float>& beforeInterleaved,
+                                const std::vector<float>& afterInterleaved, std::size_t frames);
 
     double sampleRate_ = 44100.0;
     int maxBlockSize_ = 0;
@@ -68,6 +89,9 @@ private:
     std::array<std::vector<float>, core::kMaxMonoChannels> channelScratch_;
     std::vector<float> masterLeftScratch_;
     std::vector<float> masterRightScratch_;
+    std::vector<float> stageProbeScratch_;
+    bool stageProbeEnabled_ = false;
+    std::vector<StageProbe> lastStageProbes_;
     ProcessMeters lastMeters_;
 };
 

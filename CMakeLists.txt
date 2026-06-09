@@ -170,6 +170,14 @@ add_executable(FunctionalSmoke
     src/dsp/HiddenPostFaderIrAdapter.cpp
     src/dsp/MachineProcessor.cpp)
 
+add_executable(SignalChainProbeSmoke
+    tests/SignalChainProbeSmoke.cpp
+    src/dsp/HiddenIrAdapter.cpp
+    src/dsp/HiddenMixbusIrAdapter.cpp
+    src/dsp/HiddenNamAdapter.cpp
+    src/dsp/HiddenPostFaderIrAdapter.cpp
+    src/dsp/MachineProcessor.cpp)
+
 if(GEILALIZER_BUILD_JUCE_APP)
     add_executable(OfflineRenderSlice
         tests/OfflineRenderSlice.cpp
@@ -189,6 +197,8 @@ target_include_directories(ProductE2E PRIVATE src)
 target_compile_features(ProductE2E PRIVATE cxx_std_20)
 target_include_directories(FunctionalSmoke PRIVATE src)
 target_compile_features(FunctionalSmoke PRIVATE cxx_std_20)
+target_include_directories(SignalChainProbeSmoke PRIVATE src)
+target_compile_features(SignalChainProbeSmoke PRIVATE cxx_std_20)
 if(GEILALIZER_BUILD_JUCE_APP)
     target_include_directories(OfflineRenderSlice PRIVATE src)
     target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
@@ -218,6 +228,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_link_libraries(NamAdapterSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(ProductE2E PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(FunctionalSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
+    target_link_libraries(SignalChainProbeSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     if(GEILALIZER_BUILD_JUCE_APP)
         target_link_libraries(OfflineRenderSlice PRIVATE ${GEILALIZER_NAMCORE_LINK})
         target_compile_definitions(OfflineRenderSlice PRIVATE GEILALIZER_USE_NAMCORE)
@@ -226,6 +237,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_compile_definitions(NamAdapterSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(ProductE2E PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(FunctionalSmoke PRIVATE GEILALIZER_USE_NAMCORE)
+    target_compile_definitions(SignalChainProbeSmoke PRIVATE GEILALIZER_USE_NAMCORE)
 endif()
 
 enable_testing()
@@ -233,10 +245,11 @@ add_test(NAME CoreSmoke COMMAND CoreSmoke)
 add_test(NAME NamAdapterSmoke COMMAND NamAdapterSmoke)
 add_test(NAME ProductE2E COMMAND ProductE2E)
 add_test(NAME FunctionalSmoke COMMAND FunctionalSmoke)
+add_test(NAME SignalChainProbeSmoke COMMAND SignalChainProbeSmoke)
 if(GEILALIZER_BUILD_JUCE_APP)
     add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
 endif()
-set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke PROPERTIES
+set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke SignalChainProbeSmoke PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
 if(GEILALIZER_BUILD_JUCE_APP)
