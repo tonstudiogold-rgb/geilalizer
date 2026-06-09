@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 
 #include "core/ImportPlanner.h"
+#include "core/LinearResampler.h"
 
 #include <algorithm>
 #include <cmath>
@@ -456,6 +457,28 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible(outputTrim);
 
+    exportRateLabel.setText("RATE", juce::dontSendNotification);
+    exportRateLabel.setJustificationType(juce::Justification::centred);
+    exportRateLabel.setColour(juce::Label::textColourId, text);
+    addAndMakeVisible(exportRateLabel);
+    exportSampleRate.addItem("44.1 kHz", 1);
+    exportSampleRate.addItem("48 kHz", 2);
+    exportSampleRate.setSelectedId(2, juce::dontSendNotification);
+    exportSampleRate.setColour(juce::ComboBox::textColourId, text);
+    exportSampleRate.setColour(juce::ComboBox::backgroundColourId, juce::Colours::black.withAlpha(0.45f));
+    addAndMakeVisible(exportSampleRate);
+
+    exportDepthLabel.setText("DEPTH", juce::dontSendNotification);
+    exportDepthLabel.setJustificationType(juce::Justification::centred);
+    exportDepthLabel.setColour(juce::Label::textColourId, text);
+    addAndMakeVisible(exportDepthLabel);
+    exportBitDepth.addItem("16 bit", 1);
+    exportBitDepth.addItem("24 bit", 2);
+    exportBitDepth.setSelectedId(2, juce::dontSendNotification);
+    exportBitDepth.setColour(juce::ComboBox::textColourId, text);
+    exportBitDepth.setColour(juce::ComboBox::backgroundColourId, juce::Colours::black.withAlpha(0.45f));
+    addAndMakeVisible(exportBitDepth);
+
     masterMeter = std::make_unique<MeterPlaceholder>("L / R");
     addAndMakeVisible(*masterMeter);
 
@@ -643,11 +666,12 @@ bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firs
         for (int ch = 0; ch < channelsToRead; ++ch)
         {
             auto& dest = trackBuffers[firstChannelIndex + static_cast<std::size_t>(ch)];
-            dest.assign(static_cast<std::size_t>(numFrames), 0.0f);
+            std::vector<float> imported(static_cast<std::size_t>(numFrames), 0.0f);
             const float* read = buffer.getReadPointer(ch);
-            std::copy(read, read + numFrames, dest.begin());
+            std::copy(read, read + numFrames, imported.begin());
+            dest = geilalizer::core::resampleLinear(imported, reader->sampleRate, deviceSampleRate);
             auto& state = audioEngine.session().channel(firstChannelIndex + static_cast<std::size_t>(ch));
-            state.setLoadedAudioFile(file.getFullPathName().toStdString(), ch, static_cast<std::size_t>(numFrames));
+            state.setLoadedAudioFile(file.getFullPathName().toStdString(), ch, dest.size());
             state.armed = true;
         }
     }
@@ -766,7 +790,9 @@ void MainComponent::showExportDialog()
                 return;
             if (! out.hasFileExtension("wav"))
                 out = out.withFileExtension("wav");
-            renderToFileAsync(out, 48000.0, 24);
+            const double selectedRate = exportSampleRate.getSelectedId() == 1 ? 44100.0 : 48000.0;
+            const int selectedDepth = exportBitDepth.getSelectedId() == 1 ? 16 : 24;
+            renderToFileAsync(out, selectedRate, selectedDepth);
         });
 }
 
@@ -1012,8 +1038,11 @@ void MainComponent::paint(juce::Graphics& g)
     drawPanel(g, render, "RENDER / EXPORT");
     g.setColour(text);
     g.setFont(juce::FontOptions(11.0f));
-    g.drawText("FORMAT   WAV", render.reduced(14, 40).removeFromTop(22), juce::Justification::centredLeft);
-    g.drawText("RESOLUTION   24 Bit", render.reduced(14, 62).removeFromTop(22), juce::Justification::centredLeft);
+    const juce::String renderRate = exportSampleRate.getSelectedId() == 1 ? "44.1 kHz" : "48 kHz";
+    const juce::String renderDepth = exportBitDepth.getSelectedId() == 1 ? "16 Bit" : "24 Bit";
+    g.drawText("FORMAT   WAV", render.reduced(14, 34).removeFromTop(20), juce::Justification::centredLeft);
+    g.drawText("RATE     " + renderRate, render.reduced(14, 54).removeFromTop(20), juce::Justification::centredLeft);
+    g.drawText("DEPTH    " + renderDepth, render.reduced(14, 74).removeFromTop(20), juce::Justification::centredLeft);
     drawTransportButton(g, render.withSizeKeepingCentre(120, 30).translated(0, 35), "RENDER", juce::Colour { 0xff5b5b5b });
 
     b.removeFromLeft(18);
@@ -1067,12 +1096,18 @@ void MainComponent::resized()
     masterGroup.setBounds(masterArea);
     auto m = masterArea.reduced(12, 26);
     if (masterMeter != nullptr)
-        masterMeter->setBounds(m.removeFromTop(155));
-    m.removeFromTop(8);
-    outputTrimLabel.setBounds(m.removeFromTop(18));
-    outputTrim.setBounds(m.removeFromTop(82));
-    m.removeFromTop(8);
-    limiterToggle.setBounds(m.removeFromTop(24));
+        masterMeter->setBounds(m.removeFromTop(112));
+    m.removeFromTop(6);
+    outputTrimLabel.setBounds(m.removeFromTop(16));
+    outputTrim.setBounds(m.removeFromTop(60));
+    m.removeFromTop(4);
+    exportRateLabel.setBounds(m.removeFromTop(14));
+    exportSampleRate.setBounds(m.removeFromTop(24));
+    m.removeFromTop(4);
+    exportDepthLabel.setBounds(m.removeFromTop(14));
+    exportBitDepth.setBounds(m.removeFromTop(24));
+    m.removeFromTop(6);
+    limiterToggle.setBounds(m.removeFromTop(22));
     limiterActivityLabel.setBounds(m.removeFromTop(42));
 
     auto deckArea = juce::Rectangle<int>(getWidth() / 2 - 180, 92, 410, 28);

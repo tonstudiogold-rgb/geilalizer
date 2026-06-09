@@ -74,6 +74,10 @@ private:
     juce::ToggleButton limiterToggle { "Limiter On" };
     juce::Label outputTrimLabel;
     juce::Slider outputTrim;
+    juce::Label exportRateLabel;
+    juce::ComboBox exportSampleRate;
+    juce::Label exportDepthLabel;
+    juce::ComboBox exportBitDepth;
     std::unique_ptr<MeterPlaceholder> masterMeter;
     juce::Label limiterActivityLabel;
 
