@@ -5,7 +5,7 @@
 namespace
 {
 constexpr int initialWindowWidth = 1400;
-constexpr int initialWindowHeight = 820;
+constexpr int initialWindowHeight = 1060;
 }
 
 const juce::String GeilalizerApplication::getApplicationName()
@@ -46,9 +46,10 @@ GeilalizerApplication::MainWindow::MainWindow(juce::String name)
     : DocumentWindow(std::move(name), juce::Colours::black, DocumentWindow::allButtons)
 {
     setUsingNativeTitleBar(true);
+    setResizable(true, true);
+    setResizeLimits(1100, 760, 2400, 1800);
     setContentOwned(new MainComponent(), true);
     centreWithSize(initialWindowWidth, initialWindowHeight);
-    setResizable(true, true);
     setVisible(true);
 }
 

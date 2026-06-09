@@ -12,7 +12,19 @@
 
 namespace
 {
-const auto background = juce::Colour { 0xff101010 };
+constexpr int kContentWidth = 1400;
+constexpr int kContentHeight = 1060;
+constexpr int kDeckHeight = 205;
+constexpr int kChannelAreaHeight = 548;
+constexpr int kBottomAreaHeight = 150;
+constexpr int kFooterHeight = 76;
+constexpr int kStripWidth = 132;
+constexpr int kStripHeight = 132;
+constexpr int kStripGap = 7;
+constexpr int kBankHeaderHeight = 24;
+constexpr int kBankRowGap = 5;
+
+const juce::Colour background { 0xff11100e };
 const auto panel = juce::Colour { 0xff202020 };
 const auto panelDark = juce::Colour { 0xff151515 };
 const auto panelEdge = juce::Colour { 0xff383838 };
@@ -100,19 +112,6 @@ void drawLedMeter(juce::Graphics& g, juce::Rectangle<int> area, int lit = 9, boo
         drawDbScale(g, area.removeFromRight(24));
 }
 
-void drawTransportButton(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& label,
-                         juce::Colour colour = juce::Colour { 0xff303030 })
-{
-    g.setGradientFill(juce::ColourGradient(colour.brighter(0.3f), area.getTopLeft().toFloat(),
-                                           colour.darker(0.5f), area.getBottomRight().toFloat(), false));
-    g.fillRoundedRectangle(area.toFloat(), 4.0f);
-    g.setColour(juce::Colours::black.withAlpha(0.8f));
-    g.drawRoundedRectangle(area.toFloat().reduced(0.5f), 4.0f, 1.0f);
-    g.setColour(text);
-    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.drawText(label, area, juce::Justification::centred);
-}
-
 void drawReel(juce::Graphics& g, juce::Rectangle<int> area, float rotation)
 {
     auto b = area.toFloat();
@@ -140,33 +139,6 @@ void drawReel(juce::Graphics& g, juce::Rectangle<int> area, float rotation)
     g.fillEllipse(centre.x - radius * 0.18f, centre.y - radius * 0.18f, radius * 0.36f, radius * 0.36f);
 }
 
-void drawSignalBlock(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title,
-                     const juce::String& subtitle, bool highlight = false)
-{
-    g.setColour(highlight ? panel.brighter(0.18f) : panelDark.brighter(0.05f));
-    g.fillRoundedRectangle(area.toFloat(), 4.0f);
-    g.setColour(highlight ? accent.withAlpha(0.55f) : juce::Colours::white.withAlpha(0.15f));
-    g.drawRoundedRectangle(area.toFloat().reduced(0.5f), 4.0f, 1.0f);
-    g.setColour(text);
-    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.drawText(title, area.reduced(6, 7).removeFromTop(17), juce::Justification::centred);
-    g.setColour(muted);
-    g.setFont(juce::FontOptions(9.5f));
-    g.drawFittedText(subtitle, area.reduced(7, 30), juce::Justification::centred, 2);
-}
-
-void drawArrow(juce::Graphics& g, juce::Rectangle<int> area)
-{
-    juce::Path p;
-    const float cy = (float) area.getCentreY();
-    p.startNewSubPath((float) area.getX() + 3.0f, cy);
-    p.lineTo((float) area.getRight() - 7.0f, cy);
-    p.lineTo((float) area.getRight() - 12.0f, cy - 5.0f);
-    p.startNewSubPath((float) area.getRight() - 7.0f, cy);
-    p.lineTo((float) area.getRight() - 12.0f, cy + 5.0f);
-    g.setColour(muted.withAlpha(0.8f));
-    g.strokePath(p, juce::PathStrokeType(1.7f));
-}
 } // namespace
 
 class MainComponent::MeterPlaceholder final : public juce::Component
@@ -514,7 +486,7 @@ private:
 MainComponent::MainComponent()
 {
     setOpaque(true);
-    setSize(1280, 1180);
+    setSize(kContentWidth, kContentHeight);
     formatManager.registerBasicFormats();
     audioBlockInputs.resize(channelCount);
 
@@ -557,7 +529,7 @@ MainComponent::MainComponent()
     exportButton.onClick = [this] { showExportDialog(); };
 
     channelViewport.setViewedComponent(&channelContainer, false);
-    channelViewport.setScrollBarsShown(false, true);
+    channelViewport.setScrollBarsShown(true, true);
     channelViewport.setScrollOnDragMode(juce::Viewport::ScrollOnDragMode::all);
     addAndMakeVisible(channelViewport);
 
@@ -1250,13 +1222,13 @@ void MainComponent::paint(juce::Graphics& g)
     auto bounds = getLocalBounds().reduced(16);
     bounds.removeFromTop(32);
 
-    auto deck = bounds.removeFromTop(205);
+    auto deck = bounds.removeFromTop(kDeckHeight);
     drawPanel(g, deck, "OVERVIEW");
     auto deckInner = deck.reduced(18, 26);
     drawReel(g, deckInner.removeFromLeft(315).reduced(6, 2), playing.load() ? 0.95f : 0.35f);
     drawReel(g, deckInner.removeFromRight(315).reduced(6, 2), playing.load() ? -0.85f : -0.22f);
 
-    auto transportPanel = deck.withSizeKeepingCentre(360, 104).translated(0, -12);
+    auto transportPanel = deck.withSizeKeepingCentre(470, 104).translated(0, -12);
     drawPanel(g, transportPanel, {});
     auto t = transportPanel.reduced(14, 10);
     g.setColour(muted);
@@ -1272,14 +1244,6 @@ void MainComponent::paint(juce::Graphics& g)
     g.drawText(currentTimeText(), transportPanel.getX() + 108, transportPanel.getY() + 39, 140, 24, juce::Justification::centred);
     g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
     g.drawText("15 IPS", transportPanel.getRight() - 72, transportPanel.getY() + 42, 50, 18, juce::Justification::centred);
-
-    auto btnRow = juce::Rectangle<int>(transportPanel.getX() + 12, transportPanel.getBottom() - 36, 336, 26);
-    drawTransportButton(g, btnRow.removeFromLeft(45), "LOAD"); btnRow.removeFromLeft(6);
-    drawTransportButton(g, btnRow.removeFromLeft(45), "REW"); btnRow.removeFromLeft(6);
-    drawTransportButton(g, btnRow.removeFromLeft(45), "STOP"); btnRow.removeFromLeft(6);
-    drawTransportButton(g, btnRow.removeFromLeft(45), "PLAY", juce::Colour { 0xff128111 }); btnRow.removeFromLeft(6);
-    drawTransportButton(g, btnRow.removeFromLeft(45), "REC", recording.load() ? red : red.darker(0.2f)); btnRow.removeFromLeft(6);
-    drawTransportButton(g, btnRow.removeFromLeft(54), "UNDO");
 
     auto machine = juce::Rectangle<int>(deck.getCentreX() - 170, deck.getBottom() - 70, 340, 54);
     g.setGradientFill(juce::ColourGradient(juce::Colour { 0xff9d9284 }, machine.getTopLeft().toFloat(),
@@ -1298,71 +1262,27 @@ void MainComponent::paint(juce::Graphics& g)
     g.drawLine((float) deck.getX() + 210.0f, (float) bandY, (float) machine.getX(), (float) bandY + 20.0f, 7.0f);
     g.drawLine((float) machine.getRight(), (float) bandY + 20.0f, (float) deck.getRight() - 210.0f, (float) bandY, 7.0f);
 
-    auto channelArea = bounds.removeFromTop(392);
+    auto channelArea = bounds.removeFromTop(kChannelAreaHeight);
     drawPanel(g, channelArea, "24-TRACK CHANNELS");
-    auto masterTextArea = channelArea.removeFromRight(116).reduced(10, 34);
-    g.setColour(text);
-    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.drawText("MASTER", masterTextArea.removeFromTop(18), juce::Justification::centred);
-    g.setFont(juce::FontOptions(9.0f));
-    g.drawText("OUTPUT / MONITOR", masterTextArea.removeFromBottom(18), juce::Justification::centred);
 
     bounds.removeFromTop(10);
-    auto perChannel = bounds.removeFromTop(128);
-    drawPanel(g, perChannel, "CHANNEL STRUCTURE (PER TRACK)");
-    auto flow = perChannel.reduced(18, 34);
-    const juce::StringArray channelTitles { "AUDIO FILE", "INPUT", "PREAMP", "CHANNEL", "TAPE HEAD", "FADER", "CHANNEL OUT" };
-    const juce::StringArray channelSubs { "Drag / Drop WAV", "Gain staging", "Input iron", "Line amplifier", "15 IPS response", "Post-tape level", "24 -> Mixbus" };
-    for (int i = 0; i < channelTitles.size(); ++i)
-    {
-        auto block = flow.removeFromLeft(i == 5 ? 72 : 136);
-        drawSignalBlock(g, block, channelTitles[i], channelSubs[i], i >= 2 && i <= 4);
-        if (i != channelTitles.size() - 1)
-            drawArrow(g, flow.removeFromLeft(28));
-    }
-
-    bounds.removeFromTop(10);
-    auto mixbus = bounds.removeFromTop(128);
-    drawPanel(g, mixbus, "MIXBUS ARCHITECTURE");
-    auto mixFlow = mixbus.reduced(18, 34);
-    const juce::StringArray mixTitles { "CHANNEL OUTPUTS", "MIXBUS SUMMING", "BUS DRIVE", "TAPE RETURN", "LIMITER", "CONVERTER", "MASTER OUTPUT" };
-    const juce::StringArray mixSubs { "1-24", "Analog summing", "Drive color", "15 IPS", "Protection", "A/D/A finish", "L / R" };
-    for (int i = 0; i < mixTitles.size(); ++i)
-    {
-        auto block = mixFlow.removeFromLeft(i == 0 ? 140 : 130);
-        drawSignalBlock(g, block, mixTitles[i], mixSubs[i], i >= 2 && i <= 5);
-        if (i != mixTitles.size() - 1)
-            drawArrow(g, mixFlow.removeFromLeft(24));
-    }
-
-    bounds.removeFromTop(10);
-    auto bottom = bounds.removeFromTop(150);
+    auto bottom = bounds.removeFromTop(kBottomAreaHeight);
     drawPanel(g, bottom, "MASTER CONTROL & RENDER");
     auto b = bottom.reduced(18, 34);
-    auto transport = b.removeFromLeft(320);
-    drawPanel(g, transport, "TRANSPORT");
-    auto tr = transport.reduced(10, 38);
-    drawTransportButton(g, tr.removeFromLeft(45), "LOAD"); tr.removeFromLeft(5);
-    drawTransportButton(g, tr.removeFromLeft(42), "REW"); tr.removeFromLeft(5);
-    drawTransportButton(g, tr.removeFromLeft(45), "STOP"); tr.removeFromLeft(5);
-    drawTransportButton(g, tr.removeFromLeft(45), "PLAY", juce::Colour { 0xff128111 }); tr.removeFromLeft(5);
-    drawTransportButton(g, tr.removeFromLeft(42), "REC", recording.load() ? red : red.darker(0.2f)); tr.removeFromLeft(5);
-    drawTransportButton(g, tr.removeFromLeft(52), "UNDO");
-
-    b.removeFromLeft(18);
-    auto time = b.removeFromLeft(170);
+    auto time = b.removeFromLeft(190);
     drawPanel(g, time, "TIME / POSITION");
     g.setColour(text);
     g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-    g.drawText(currentTimeText(), time.reduced(14, 46), juce::Justification::centred);
+    g.drawText(currentTimeText(), time.reduced(14, 32), juce::Justification::centred);
 
     b.removeFromLeft(18);
     auto project = b.removeFromLeft(230);
     drawPanel(g, project, "PROJECT");
     g.setColour(text);
-    g.setFont(juce::FontOptions(11.0f));
-    g.drawText(projectName, project.reduced(14, 45), juce::Justification::centred);
-    g.drawText(juce::String(deviceSampleRate / 1000.0, 1) + " kHz  |  24 Bit  |  15 IPS", project.reduced(14, 70), juce::Justification::centred);
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText(projectName, project.reduced(14, 28).removeFromTop(22), juce::Justification::centred);
+    g.setFont(juce::FontOptions(10.0f));
+    g.drawText(juce::String(deviceSampleRate / 1000.0, 1) + " kHz  |  24 Bit  |  15 IPS", project.reduced(14, 54).removeFromTop(20), juce::Justification::centred);
 
     b.removeFromLeft(18);
     auto render = b.removeFromLeft(200);
@@ -1371,15 +1291,11 @@ void MainComponent::paint(juce::Graphics& g)
     g.setFont(juce::FontOptions(11.0f));
     const juce::String renderRate = exportSampleRate.getSelectedId() == 1 ? "44.1 kHz" : "48 kHz";
     const juce::String renderDepth = exportBitDepth.getSelectedId() == 1 ? "16 Bit" : "24 Bit";
-    g.drawText("FORMAT   WAV", render.reduced(14, 28).removeFromTop(18), juce::Justification::centredLeft);
-    g.drawText("RATE     " + renderRate, render.reduced(14, 46).removeFromTop(18), juce::Justification::centredLeft);
-    g.drawText("DEPTH    " + renderDepth, render.reduced(14, 64).removeFromTop(18), juce::Justification::centredLeft);
-    const bool manualRangeClamped = ! renderFullSongToggle.getToggleState() && renderEndSeconds.getValue() <= renderStartSeconds.getValue();
-    const juce::String rangeText = renderFullSongToggle.getToggleState() ? "FULL SONG" : juce::String(renderStartSeconds.getValue(), 1) + "s -> " + juce::String(renderEndSeconds.getValue(), 1) + "s" + (manualRangeClamped ? "  CLAMPED" : "");
-    g.setColour(manualRangeClamped ? accent : text);
-    g.drawText("RANGE    " + rangeText, render.reduced(14, 82).removeFromTop(18), juce::Justification::centredLeft);
+    g.drawText("FORMAT   WAV", render.getX() + 14, render.getY() + 28, render.getWidth() - 28, 15, juce::Justification::centredLeft);
+    g.drawText("RATE     " + renderRate, render.getX() + 14, render.getY() + 43, render.getWidth() - 28, 15, juce::Justification::centredLeft);
+    g.drawText("DEPTH    " + renderDepth, render.getX() + 14, render.getY() + 58, render.getWidth() - 28, 15, juce::Justification::centredLeft);
+    g.drawText(renderFullSongToggle.getToggleState() ? "RANGE    FULL SONG" : "RANGE    MANUAL", render.getX() + 14, render.getY() + 73, render.getWidth() - 28, 15, juce::Justification::centredLeft);
     g.setColour(text);
-    drawTransportButton(g, render.withSizeKeepingCentre(120, 28).translated(0, 42), "RENDER", juce::Colour { 0xff5b5b5b });
 
     b.removeFromLeft(18);
     drawPanel(g, b, "OUTPUT METERS");
@@ -1390,7 +1306,7 @@ void MainComponent::paint(juce::Graphics& g)
     }
     drawLedMeter(g, b.reduced(30, 34), lit, true, lit, true);
 
-    auto footer = bounds.removeFromTop(76);
+    auto footer = bounds.removeFromTop(kFooterHeight);
     drawPanel(g, footer, {});
     juce::String status;
     {
@@ -1413,23 +1329,18 @@ void MainComponent::resized()
     if (channels.size() < channelCount)
         return;
 
-    bounds.removeFromTop(205);
-    auto channelPanel = bounds.removeFromTop(392).reduced(16, 30);
+    bounds.removeFromTop(kDeckHeight);
+    auto channelPanel = bounds.removeFromTop(kChannelAreaHeight).reduced(16, 30);
     auto masterArea = channelPanel.removeFromRight(122);
     channelPanel.removeFromRight(8);
 
     channelViewport.setBounds(channelPanel);
-    constexpr int stripWidth = 82;
-    constexpr int stripHeight = 168;
-    constexpr int stripGap = 7;
-    constexpr int bankHeaderHeight = 26;
-    const int rowGap = 10;
     const int cols = 8;
     int y = 0;
     for (int bank = 0; bank < 3; ++bank)
     {
-        bankToggles[static_cast<std::size_t>(bank)].setBounds(channelPanel.getX(), channelPanel.getY() + y, channelPanel.getWidth() - 18, bankHeaderHeight);
-        y += bankHeaderHeight;
+        bankToggles[static_cast<std::size_t>(bank)].setBounds(channelPanel.getX(), channelPanel.getY() + y, channelPanel.getWidth() - 18, kBankHeaderHeight);
+        y += kBankHeaderHeight;
         if (! bankOpen[static_cast<std::size_t>(bank)])
         {
             for (int i = bank * 8; i < bank * 8 + 8; ++i)
@@ -1441,11 +1352,11 @@ void MainComponent::resized()
         {
             const int col = i % cols;
             channels[i]->setVisible(true);
-            channels[i]->setBounds(stripGap + col * (stripWidth + stripGap), y, stripWidth, stripHeight);
+            channels[i]->setBounds(kStripGap + col * (kStripWidth + kStripGap), y, kStripWidth, kStripHeight);
         }
-        y += stripHeight + rowGap;
+        y += kStripHeight + kBankRowGap;
     }
-    channelContainer.setBounds(0, 0, cols * (stripWidth + stripGap) + stripGap, y + 2);
+    channelContainer.setBounds(0, 0, cols * (kStripWidth + kStripGap) + kStripGap, y + 2);
 
     masterGroup.setBounds(masterArea);
     auto m = masterArea.reduced(12, 26);
@@ -1453,7 +1364,7 @@ void MainComponent::resized()
         masterMeter->setBounds(m.removeFromTop(112));
     m.removeFromTop(6);
     outputTrimLabel.setBounds(m.removeFromTop(16));
-    outputTrim.setBounds(m.removeFromTop(60));
+    outputTrim.setBounds(m.removeFromTop(54));
     m.removeFromTop(4);
     exportRateLabel.setBounds(m.removeFromTop(14));
     exportSampleRate.setBounds(m.removeFromTop(24));
@@ -1461,18 +1372,20 @@ void MainComponent::resized()
     exportDepthLabel.setBounds(m.removeFromTop(14));
     exportBitDepth.setBounds(m.removeFromTop(24));
     m.removeFromTop(4);
-    renderStartLabel.setBounds(m.removeFromTop(12));
-    renderStartSeconds.setBounds(m.removeFromTop(22));
-    m.removeFromTop(3);
+    renderStartLabel.setBounds(m.removeFromTop(0));
+    renderStartSeconds.setBounds(m.removeFromTop(0));
     renderFullSongToggle.setBounds(m.removeFromTop(20));
-    m.removeFromTop(2);
-    renderEndLabel.setBounds(m.removeFromTop(12));
-    renderEndSeconds.setBounds(m.removeFromTop(22));
-    m.removeFromTop(6);
+    renderEndLabel.setBounds(m.removeFromTop(0));
+    renderEndSeconds.setBounds(m.removeFromTop(0));
+    m.removeFromTop(4);
     limiterToggle.setBounds(m.removeFromTop(22));
     limiterActivityLabel.setBounds(m.removeFromTop(42));
 
-    auto deckArea = juce::Rectangle<int>(getWidth() / 2 - 260, 92, 560, 28);
+    auto local = getLocalBounds().reduced(16);
+    local.removeFromTop(32);
+    auto deck = local.removeFromTop(kDeckHeight);
+    auto transportPanel = deck.withSizeKeepingCentre(470, 104).translated(0, -12);
+    auto deckArea = juce::Rectangle<int>(transportPanel.getX() + 12, transportPanel.getBottom() - 36, transportPanel.getWidth() - 24, 26);
     loadButton.setBounds(deckArea.removeFromLeft(62));
     deckArea.removeFromLeft(6);
     rewButton.setBounds(deckArea.removeFromLeft(52));
@@ -1485,5 +1398,5 @@ void MainComponent::resized()
     deckArea.removeFromLeft(6);
     undoButton.setBounds(deckArea.removeFromLeft(68));
     deckArea.removeFromLeft(6);
-    exportButton.setBounds(deckArea.removeFromLeft(88));
+    exportButton.setBounds(deckArea.removeFromLeft(70));
 }
