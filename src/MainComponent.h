@@ -48,9 +48,8 @@ private:
     void stop();
     void rewind();
     void updateTransportStatus();
-    void renderToFileAsync(const juce::File& outputFile, double sampleRate, int bitDepth);
-    bool writeWavFile(const juce::File& outputFile, const std::vector<float>& interleavedStereo,
-                      std::size_t frames, double sampleRate, int bitDepth, juce::String& errorMessage);
+    void renderToFileAsync(const juce::File& outputFile, double sampleRate, int bitDepth,
+                           std::size_t startFrame, std::size_t numFrames, bool fullLength);
     std::vector<std::vector<float>> snapshotTrackBuffers() const;
     std::size_t maxLoadedFrames() const;
     juce::String currentTimeText() const;
@@ -78,6 +77,10 @@ private:
     juce::ComboBox exportSampleRate;
     juce::Label exportDepthLabel;
     juce::ComboBox exportBitDepth;
+    juce::Label renderStartLabel;
+    juce::Slider renderStartSeconds;
+    juce::Label renderLengthLabel;
+    juce::Slider renderLengthSeconds;
     std::unique_ptr<MeterPlaceholder> masterMeter;
     juce::Label limiterActivityLabel;
 
@@ -94,7 +97,7 @@ private:
     std::atomic<std::int64_t> playheadFrame { 0 };
     double deviceSampleRate = 44100.0;
     int deviceBlockSize = 512;
-    juce::String statusText { "Bereit – WAV/AIFF/FLAC/MP3 auf Kanal ziehen oder RENDER klicken." };
+    juce::String statusText { "Ready – drag WAV/AIFF/FLAC/MP3 onto a track or click RENDER." };
     juce::String projectName { "Geilalizer Session" };
     juce::CriticalSection statusLock;
 

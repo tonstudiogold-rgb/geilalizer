@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 
 #include "core/ImportPlanner.h"
+#include "core/LevelMeter.h"
 #include "core/LinearResampler.h"
 
 #include <algorithm>
@@ -146,8 +147,8 @@ public:
 
     void setLevels(float newLeft, float newRight)
     {
-        left = sanitisePeak(newLeft);
-        right = sanitisePeak(newRight);
+        left.pushPeak(newLeft);
+        right.pushPeak(newRight);
         repaint();
     }
 
@@ -156,17 +157,24 @@ public:
         drawPanel(g, getLocalBounds(), {});
         auto area = getLocalBounds().reduced(10, 12);
         const bool stereo = label.containsIgnoreCase("L / R");
-        const int lit = stereo ? peakToSegments(std::max(left, right)) : peakToSegments(left);
+        const int lit = stereo ? peakToSegments(std::max(left.displayPeak(), right.displayPeak())) : peakToSegments(left.displayPeak());
         drawLedMeter(g, area.removeFromTop(area.getHeight() - 24), lit, stereo);
         g.setColour(text.withAlpha(0.8f));
         g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
         g.drawText(label, area, juce::Justification::centred);
+        if (left.clipped() || right.clipped())
+        {
+            g.setColour(red);
+            g.drawText("CLIP", getLocalBounds().reduced(8).removeFromTop(15), juce::Justification::centredRight);
+        }
+        left.decay();
+        right.decay();
     }
 
 private:
     juce::String label;
-    float left = 0.0f;
-    float right = 0.0f;
+    geilalizer::core::LevelMeter left;
+    geilalizer::core::LevelMeter right;
 };
 
 class MainComponent::ChannelStrip final : public juce::Component,
@@ -264,7 +272,7 @@ public:
 
     void setMeterPeak(float peak)
     {
-        meterPeak = sanitisePeak(peak);
+        meter.pushPeak(peak);
         repaint();
     }
 
@@ -302,13 +310,18 @@ public:
         g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
 
         auto meterArea = juce::Rectangle<int>(7, 30, 13, 94);
-        drawLedMeter(g, meterArea, peakToSegments(meterPeak), false);
+        drawLedMeter(g, meterArea, peakToSegments(meter.displayPeak()), false);
 
         g.setColour(muted);
         g.setFont(juce::FontOptions(9.0f));
         g.drawText("PEAK", 24, 31, getWidth() - 28, 14, juce::Justification::centred);
         g.setColour(loaded ? green : red.withAlpha(0.45f));
         g.fillEllipse(31.0f, 50.0f, 5.0f, 5.0f);
+        g.setColour(meter.clipped() ? red : muted);
+        g.setFont(juce::FontOptions(8.0f, juce::Font::bold));
+        g.drawText(meter.clipped() ? "CLIP" : juce::String(meter.displayDb(), 0) + " dB",
+                   22, 72, getWidth() - 26, 12, juce::Justification::centred);
+        meter.decay();
 
         if (dragging)
         {
@@ -335,7 +348,7 @@ private:
     MainComponent& owner;
     bool dragging = false;
     bool loaded = false;
-    float meterPeak = 0.0f;
+    geilalizer::core::LevelMeter meter;
     juce::Label nameEditor;
     juce::Label inputLabel;
     juce::Slider inputGain;
@@ -384,7 +397,7 @@ MainComponent::MainComponent()
     formatManager.registerBasicFormats();
     audioBlockInputs.resize(channelCount);
 
-    titleLabel.setText("24-SPUR STANDALONE GEILALIZER – BANDMASCHINE", juce::dontSendNotification);
+    titleLabel.setText("24-TRACK STANDALONE GEILALIZER – TAPE MACHINE", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
     titleLabel.setJustificationType(juce::Justification::centredLeft);
     titleLabel.setColour(juce::Label::textColourId, text);
@@ -402,7 +415,7 @@ MainComponent::MainComponent()
 
     loadButton.onClick = [this]
     {
-        activeFileChooser = std::make_shared<juce::FileChooser>("Audiodatei laden", juce::File{}, "*.wav;*.aiff;*.aif;*.flac;*.mp3");
+        activeFileChooser = std::make_shared<juce::FileChooser>("Load audio file", juce::File{}, "*.wav;*.aiff;*.aif;*.flac;*.mp3");
         activeFileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
             [this, chooser = activeFileChooser](const juce::FileChooser& fc)
             {
@@ -478,6 +491,27 @@ MainComponent::MainComponent()
     exportBitDepth.setColour(juce::ComboBox::textColourId, text);
     exportBitDepth.setColour(juce::ComboBox::backgroundColourId, juce::Colours::black.withAlpha(0.45f));
     addAndMakeVisible(exportBitDepth);
+
+    renderStartLabel.setText("START", juce::dontSendNotification);
+    renderStartLabel.setJustificationType(juce::Justification::centred);
+    renderStartLabel.setColour(juce::Label::textColourId, text);
+    addAndMakeVisible(renderStartLabel);
+    renderStartSeconds.setSliderStyle(juce::Slider::LinearHorizontal);
+    renderStartSeconds.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 18);
+    renderStartSeconds.setRange(0.0, 600.0, 0.1);
+    renderStartSeconds.setTextValueSuffix(" s");
+    addAndMakeVisible(renderStartSeconds);
+
+    renderLengthLabel.setText("LENGTH", juce::dontSendNotification);
+    renderLengthLabel.setJustificationType(juce::Justification::centred);
+    renderLengthLabel.setColour(juce::Label::textColourId, text);
+    addAndMakeVisible(renderLengthLabel);
+    renderLengthSeconds.setSliderStyle(juce::Slider::LinearHorizontal);
+    renderLengthSeconds.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 18);
+    renderLengthSeconds.setRange(0.0, 600.0, 0.1);
+    renderLengthSeconds.setTextValueSuffix(" s");
+    renderLengthSeconds.setValue(0.0, juce::dontSendNotification);
+    addAndMakeVisible(renderLengthSeconds);
 
     masterMeter = std::make_unique<MeterPlaceholder>("L / R");
     addAndMakeVisible(*masterMeter);
@@ -624,21 +658,21 @@ bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firs
 {
     if (! file.existsAsFile() || firstChannelIndex >= trackBuffers.size())
     {
-        setStatus("Import fehlgeschlagen: Datei oder Zielkanal ungültig.");
+        setStatus("Import failed: invalid file or target track.");
         return false;
     }
 
     std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
     if (reader == nullptr)
     {
-        setStatus("Import fehlgeschlagen: Format nicht unterstützt.");
+        setStatus("Import failed: unsupported format.");
         return false;
     }
 
     const auto numFrames = static_cast<int>(std::min<juce::int64>(reader->lengthInSamples, static_cast<juce::int64>(std::numeric_limits<int>::max())));
     if (numFrames <= 0)
     {
-        setStatus("Import fehlgeschlagen: Datei enthält keine Samples.");
+        setStatus("Import failed: file contains no samples.");
         return false;
     }
 
@@ -715,13 +749,13 @@ void MainComponent::play()
 {
     if (maxLoadedFrames() == 0)
     {
-        setStatus("Nichts geladen – erst Audiodatei per LOAD oder Drag & Drop importieren.");
+        setStatus("Nothing loaded – import audio with LOAD or drag and drop first.");
         return;
     }
     if (static_cast<std::size_t>(std::max<std::int64_t>(0, playheadFrame.load())) >= maxLoadedFrames())
         rewind();
     playing.store(true);
-    setStatus("PLAY – Wiedergabe über die feste NAM/IR-Kette läuft.");
+    setStatus("PLAY – fixed tape-machine signal path is running.");
 }
 
 void MainComponent::stop()
@@ -774,11 +808,15 @@ void MainComponent::showExportDialog()
 {
     if (maxLoadedFrames() == 0)
     {
-        setStatus("Render nicht möglich: keine Audiodateien geladen.");
+        setStatus("Render unavailable: no audio files loaded.");
         return;
     }
 
-    activeFileChooser = std::make_shared<juce::FileChooser>("Geilalizer Render speichern",
+    const double totalSeconds = deviceSampleRate > 0.0 ? static_cast<double>(maxLoadedFrames()) / deviceSampleRate : 0.0;
+    renderStartSeconds.setRange(0.0, totalSeconds, 0.1);
+    renderLengthSeconds.setRange(0.0, totalSeconds, 0.1);
+
+    activeFileChooser = std::make_shared<juce::FileChooser>("Save Geilalizer render",
                                                             juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
                                                                 .getChildFile(projectName + "-geilalized.wav"),
                                                             "*.wav");
@@ -792,11 +830,15 @@ void MainComponent::showExportDialog()
                 out = out.withFileExtension("wav");
             const double selectedRate = exportSampleRate.getSelectedId() == 1 ? 44100.0 : 48000.0;
             const int selectedDepth = exportBitDepth.getSelectedId() == 1 ? 16 : 24;
-            renderToFileAsync(out, selectedRate, selectedDepth);
+            const auto startFrame = static_cast<std::size_t>(std::max(0.0, renderStartSeconds.getValue()) * deviceSampleRate);
+            const auto requestedFrames = static_cast<std::size_t>(std::max(0.0, renderLengthSeconds.getValue()) * deviceSampleRate);
+            const bool fullLength = requestedFrames == 0;
+            renderToFileAsync(out, selectedRate, selectedDepth, startFrame, requestedFrames, fullLength);
         });
 }
 
-void MainComponent::renderToFileAsync(const juce::File& outputFile, double sampleRate, int bitDepth)
+void MainComponent::renderToFileAsync(const juce::File& outputFile, double sampleRate, int bitDepth,
+                                      std::size_t startFrame, std::size_t numFrames, bool fullLength)
 {
     const auto buffers = snapshotTrackBuffers();
     geilalizer::core::SessionState sessionCopy;
@@ -805,70 +847,76 @@ void MainComponent::renderToFileAsync(const juce::File& outputFile, double sampl
         sessionCopy = audioEngine.session();
     }
 
-    setStatus("Render läuft…");
+    setStatus("Rendering…");
     exportButton.setEnabled(false);
     const juce::Component::SafePointer<MainComponent> safeThis(this);
-    std::thread([safeThis, outputFile, sampleRate, bitDepth, buffers, sessionCopy]() mutable
+    std::thread([safeThis, outputFile, sampleRate, bitDepth, startFrame, numFrames, fullLength, buffers, sessionCopy]() mutable
     {
-        geilalizer::core::RenderEngine renderer;
-        geilalizer::core::RenderRequest request;
-        request.sampleRate = sampleRate;
-        request.bitDepth = bitDepth;
-        request.fullLength = true;
-        const auto result = renderer.render(sessionCopy, buffers, request);
         juce::String message;
-        bool ok = result.completed;
-        if (! ok)
-            message = result.message;
-        else
-            ok = safeThis != nullptr && safeThis->writeWavFile(outputFile, result.interleavedStereo,
-                                                              result.interleavedStereo.size() / 2,
-                                                              sampleRate, bitDepth, message);
+        bool ok = true;
+        outputFile.deleteFile();
+        std::unique_ptr<juce::FileOutputStream> stream(outputFile.createOutputStream());
+        if (stream == nullptr || ! stream->openedOk())
+        {
+            ok = false;
+            message = "Output file cannot be opened.";
+        }
 
+        std::unique_ptr<juce::AudioFormatWriter> writer;
+        if (ok)
+        {
+            juce::WavAudioFormat wav;
+            writer.reset(wav.createWriterFor(stream.get(), sampleRate, 2u, bitDepth, {}, 0));
+            if (writer == nullptr)
+            {
+                ok = false;
+                message = "WAV writer could not be created.";
+            }
+            else
+            {
+                stream.release();
+            }
+        }
+
+        geilalizer::core::RenderResult result;
+        if (ok)
+        {
+            geilalizer::core::RenderEngine renderer;
+            geilalizer::core::RenderRequest request;
+            request.sampleRate = sampleRate;
+            request.bitDepth = bitDepth;
+            request.fullLength = fullLength;
+            request.startFrame = startFrame;
+            request.numFrames = numFrames;
+            request.blockSize = 32768;
+
+            result = renderer.renderToSink(sessionCopy, buffers, request,
+                [&writer](const float* interleavedStereo, std::size_t frames)
+                {
+                    if (writer == nullptr || interleavedStereo == nullptr)
+                        return false;
+                    juce::AudioBuffer<float> buffer(2, static_cast<int>(frames));
+                    for (int i = 0; i < static_cast<int>(frames); ++i)
+                    {
+                        buffer.setSample(0, i, interleavedStereo[static_cast<std::size_t>(i) * 2]);
+                        buffer.setSample(1, i, interleavedStereo[static_cast<std::size_t>(i) * 2 + 1]);
+                    }
+                    return writer->writeFromAudioSampleBuffer(buffer, 0, static_cast<int>(frames));
+                });
+            ok = result.completed;
+            if (! ok)
+                message = result.message;
+        }
+
+        writer.reset();
         juce::MessageManager::callAsync([safeThis, ok, outputFile, message]
         {
             if (safeThis == nullptr)
                 return;
             safeThis->exportButton.setEnabled(true);
-            safeThis->setStatus(ok ? "Render fertig: " + outputFile.getFullPathName() : "Render fehlgeschlagen: " + message);
+            safeThis->setStatus(ok ? "Render complete: " + outputFile.getFullPathName() : "Render failed: " + message);
         });
     }).detach();
-}
-
-bool MainComponent::writeWavFile(const juce::File& outputFile, const std::vector<float>& interleavedStereo,
-                                 std::size_t frames, double sampleRate, int bitDepth, juce::String& errorMessage)
-{
-    outputFile.deleteFile();
-    std::unique_ptr<juce::FileOutputStream> stream(outputFile.createOutputStream());
-    if (stream == nullptr || ! stream->openedOk())
-    {
-        errorMessage = "Ausgabedatei kann nicht geöffnet werden.";
-        return false;
-    }
-
-    juce::WavAudioFormat wav;
-    std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(stream.get(), sampleRate, 2,
-                                                                        static_cast<unsigned int>(bitDepth), {}, 0));
-    if (writer == nullptr)
-    {
-        errorMessage = "WAV Writer konnte nicht erstellt werden.";
-        return false;
-    }
-    stream.release();
-
-    juce::AudioBuffer<float> buffer(2, static_cast<int>(frames));
-    for (int i = 0; i < static_cast<int>(frames); ++i)
-    {
-        buffer.setSample(0, i, interleavedStereo[static_cast<std::size_t>(i) * 2]);
-        buffer.setSample(1, i, interleavedStereo[static_cast<std::size_t>(i) * 2 + 1]);
-    }
-
-    if (! writer->writeFromAudioSampleBuffer(buffer, 0, static_cast<int>(frames)))
-    {
-        errorMessage = "WAV Samples konnten nicht geschrieben werden.";
-        return false;
-    }
-    return true;
 }
 
 void MainComponent::timerCallback()
@@ -922,7 +970,7 @@ void MainComponent::paint(juce::Graphics& g)
     bounds.removeFromTop(32);
 
     auto deck = bounds.removeFromTop(205);
-    drawPanel(g, deck, "ÜBERSICHT");
+    drawPanel(g, deck, "OVERVIEW");
     auto deckInner = deck.reduced(18, 26);
     drawReel(g, deckInner.removeFromLeft(315).reduced(6, 2), playing.load() ? 0.95f : 0.35f);
     drawReel(g, deckInner.removeFromRight(315).reduced(6, 2), playing.load() ? -0.85f : -0.22f);
@@ -949,7 +997,7 @@ void MainComponent::paint(juce::Graphics& g)
     drawTransportButton(g, btnRow.removeFromLeft(48), "REW"); btnRow.removeFromLeft(7);
     drawTransportButton(g, btnRow.removeFromLeft(48), "STOP"); btnRow.removeFromLeft(7);
     drawTransportButton(g, btnRow.removeFromLeft(48), "PLAY", juce::Colour { 0xff128111 }); btnRow.removeFromLeft(7);
-    drawTransportButton(g, btnRow.removeFromLeft(48), "REC", red.darker(0.2f));
+    drawTransportButton(g, btnRow.removeFromLeft(48), "READY", red.darker(0.2f));
 
     auto machine = juce::Rectangle<int>(deck.getCentreX() - 170, deck.getBottom() - 70, 340, 54);
     g.setGradientFill(juce::ColourGradient(juce::Colour { 0xff9d9284 }, machine.getTopLeft().toFloat(),
@@ -969,7 +1017,7 @@ void MainComponent::paint(juce::Graphics& g)
     g.drawLine((float) machine.getRight(), (float) bandY + 20.0f, (float) deck.getRight() - 210.0f, (float) bandY, 7.0f);
 
     auto channelArea = bounds.removeFromTop(392);
-    drawPanel(g, channelArea, "24-SPUR KANÄLE");
+    drawPanel(g, channelArea, "24-TRACK CHANNELS");
     auto masterTextArea = channelArea.removeFromRight(116).reduced(10, 34);
     g.setColour(text);
     g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
@@ -979,10 +1027,10 @@ void MainComponent::paint(juce::Graphics& g)
 
     bounds.removeFromTop(10);
     auto perChannel = bounds.removeFromTop(128);
-    drawPanel(g, perChannel, "KANAL STRUKTUR (PRO KANAL)");
+    drawPanel(g, perChannel, "CHANNEL STRUCTURE (PER TRACK)");
     auto flow = perChannel.reduced(18, 34);
-    const juce::StringArray channelTitles { "AUDIO FILE", "INPUT", "NAM 1", "NAM 2", "NAM 3", "FADER", "CHANNEL OUT" };
-    const juce::StringArray channelSubs { "Drag / Drop WAV", "Gain staging", "PRE / INPUT AMP", "CHANNEL / LINE", "HEAD / TAPE RESPONSE", "Post-tape level", "24 → Mixbus" };
+    const juce::StringArray channelTitles { "AUDIO FILE", "INPUT", "PREAMP", "CHANNEL", "TAPE HEAD", "FADER", "CHANNEL OUT" };
+    const juce::StringArray channelSubs { "Drag / Drop WAV", "Gain staging", "Input iron", "Line amplifier", "15 IPS response", "Post-tape level", "24 → Mixbus" };
     for (int i = 0; i < channelTitles.size(); ++i)
     {
         auto block = flow.removeFromLeft(i == 5 ? 72 : 136);
@@ -993,10 +1041,10 @@ void MainComponent::paint(juce::Graphics& g)
 
     bounds.removeFromTop(10);
     auto mixbus = bounds.removeFromTop(128);
-    drawPanel(g, mixbus, "MIXBUS ARCHITEKTUR");
+    drawPanel(g, mixbus, "MIXBUS ARCHITECTURE");
     auto mixFlow = mixbus.reduced(18, 34);
-    const juce::StringArray mixTitles { "CHANNEL OUTPUTS", "MIXBUS SUMMING", "NAM 4", "NAM 5", "NAM 6", "NAM 7", "MASTER OUTPUT" };
-    const juce::StringArray mixSubs { "1–24", "Analog summing", "MIXBUS / FARBE", "TAPE", "LIMIT", "CONVERTER", "L / R" };
+    const juce::StringArray mixTitles { "CHANNEL OUTPUTS", "MIXBUS SUMMING", "BUS DRIVE", "TAPE RETURN", "LIMITER", "CONVERTER", "MASTER OUTPUT" };
+    const juce::StringArray mixSubs { "1–24", "Analog summing", "Drive color", "15 IPS", "Protection", "A/D/A finish", "L / R" };
     for (int i = 0; i < mixTitles.size(); ++i)
     {
         auto block = mixFlow.removeFromLeft(i == 0 ? 140 : 130);
@@ -1007,7 +1055,7 @@ void MainComponent::paint(juce::Graphics& g)
 
     bounds.removeFromTop(10);
     auto bottom = bounds.removeFromTop(150);
-    drawPanel(g, bottom, "HAUPTSTEUERUNG & RENDER");
+    drawPanel(g, bottom, "MASTER CONTROL & RENDER");
     auto b = bottom.reduced(18, 34);
     auto transport = b.removeFromLeft(320);
     drawPanel(g, transport, "TRANSPORT");
@@ -1016,7 +1064,7 @@ void MainComponent::paint(juce::Graphics& g)
     drawTransportButton(g, tr.removeFromLeft(54), "REW"); tr.removeFromLeft(8);
     drawTransportButton(g, tr.removeFromLeft(54), "STOP"); tr.removeFromLeft(8);
     drawTransportButton(g, tr.removeFromLeft(54), "PLAY", juce::Colour { 0xff128111 }); tr.removeFromLeft(8);
-    drawTransportButton(g, tr.removeFromLeft(54), "REC", red.darker(0.2f));
+    drawTransportButton(g, tr.removeFromLeft(54), "READY", red.darker(0.2f));
 
     b.removeFromLeft(18);
     auto time = b.removeFromLeft(170);
@@ -1040,10 +1088,12 @@ void MainComponent::paint(juce::Graphics& g)
     g.setFont(juce::FontOptions(11.0f));
     const juce::String renderRate = exportSampleRate.getSelectedId() == 1 ? "44.1 kHz" : "48 kHz";
     const juce::String renderDepth = exportBitDepth.getSelectedId() == 1 ? "16 Bit" : "24 Bit";
-    g.drawText("FORMAT   WAV", render.reduced(14, 34).removeFromTop(20), juce::Justification::centredLeft);
-    g.drawText("RATE     " + renderRate, render.reduced(14, 54).removeFromTop(20), juce::Justification::centredLeft);
-    g.drawText("DEPTH    " + renderDepth, render.reduced(14, 74).removeFromTop(20), juce::Justification::centredLeft);
-    drawTransportButton(g, render.withSizeKeepingCentre(120, 30).translated(0, 35), "RENDER", juce::Colour { 0xff5b5b5b });
+    g.drawText("FORMAT   WAV", render.reduced(14, 28).removeFromTop(18), juce::Justification::centredLeft);
+    g.drawText("RATE     " + renderRate, render.reduced(14, 46).removeFromTop(18), juce::Justification::centredLeft);
+    g.drawText("DEPTH    " + renderDepth, render.reduced(14, 64).removeFromTop(18), juce::Justification::centredLeft);
+    const juce::String rangeText = renderLengthSeconds.getValue() <= 0.0 ? "FULL" : juce::String(renderStartSeconds.getValue(), 1) + "s + " + juce::String(renderLengthSeconds.getValue(), 1) + "s";
+    g.drawText("RANGE    " + rangeText, render.reduced(14, 82).removeFromTop(18), juce::Justification::centredLeft);
+    drawTransportButton(g, render.withSizeKeepingCentre(120, 28).translated(0, 42), "RENDER", juce::Colour { 0xff5b5b5b });
 
     b.removeFromLeft(18);
     drawPanel(g, b, "OUTPUT METERS");
@@ -1106,6 +1156,12 @@ void MainComponent::resized()
     m.removeFromTop(4);
     exportDepthLabel.setBounds(m.removeFromTop(14));
     exportBitDepth.setBounds(m.removeFromTop(24));
+    m.removeFromTop(4);
+    renderStartLabel.setBounds(m.removeFromTop(12));
+    renderStartSeconds.setBounds(m.removeFromTop(22));
+    m.removeFromTop(3);
+    renderLengthLabel.setBounds(m.removeFromTop(12));
+    renderLengthSeconds.setBounds(m.removeFromTop(22));
     m.removeFromTop(6);
     limiterToggle.setBounds(m.removeFromTop(22));
     limiterActivityLabel.setBounds(m.removeFromTop(42));

@@ -4,6 +4,7 @@
 #include "../dsp/MachineProcessor.h"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@ struct RenderRequest
     int bitDepth = 24;
     std::size_t startFrame = 0;
     std::size_t numFrames = 0;
+    std::size_t blockSize = 65536;
     bool fullLength = true;
 };
 
@@ -29,9 +31,16 @@ struct RenderResult
 class RenderEngine
 {
 public:
+    using RenderSink = std::function<bool(const float* interleavedStereo, std::size_t frames)>;
+
     RenderResult render(const SessionState& session,
                         const std::vector<std::vector<float>>& monoChannelInputs,
                         const RenderRequest& request);
+
+    RenderResult renderToSink(const SessionState& session,
+                              const std::vector<std::vector<float>>& monoChannelInputs,
+                              const RenderRequest& request,
+                              const RenderSink& sink);
 
 private:
     dsp::MachineProcessor processor_;

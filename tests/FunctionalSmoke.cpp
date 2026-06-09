@@ -1,6 +1,8 @@
 #include "core/AudioEngine.h"
 #include "core/ImportPlanner.h"
+#include "core/LevelMeter.h"
 #include "core/LinearResampler.h"
+#include "core/RenderEngine.h"
 #include "core/SessionState.h"
 
 #include <array>
@@ -64,6 +66,20 @@ int main()
     channel.setFaderGainDb(-999.0f);
     assert(channel.faderGainDb == core::kFaderGainMinDb);
 
+    core::LevelMeter meter;
+    meter.configure(0.5f, 0.25f);
+    meter.pushPeak(0.25f);
+    assert(meter.displayPeak() > 0.0f);
+    assert(meter.holdPeak() >= meter.displayPeak());
+    assert(!meter.clipped());
+    meter.pushPeak(1.25f);
+    assert(meter.clipped());
+    assert(meter.displayDb() <= 0.0f);
+    meter.decay();
+    assert(meter.displayPeak() < 1.0f);
+    meter.resetClip();
+    assert(!meter.clipped());
+
     core::AudioEngine engine;
     engine.prepare(44100.0, 8);
     std::vector<std::vector<float>> monoInputs(core::kMaxMonoChannels);
@@ -76,6 +92,30 @@ int main()
     assert(engine.session().master.meterRightPeak >= 0.0f);
     for (float sample : out)
         assert(std::isfinite(sample));
+
+    core::RenderEngine renderer;
+    core::RenderRequest rangeRequest;
+    rangeRequest.sampleRate = 44100.0;
+    rangeRequest.bitDepth = 24;
+    rangeRequest.fullLength = false;
+    rangeRequest.startFrame = 2;
+    rangeRequest.numFrames = 4;
+    rangeRequest.blockSize = 2;
+    std::size_t streamedFrames = 0;
+    std::size_t callbackCount = 0;
+    const auto rangeResult = renderer.renderToSink(engine.session(), monoInputs, rangeRequest,
+        [&](const float* interleavedStereo, std::size_t frames)
+        {
+            assert(interleavedStereo != nullptr);
+            assert(frames <= 2);
+            streamedFrames += frames;
+            ++callbackCount;
+            return true;
+        });
+    assert(rangeResult.completed);
+    assert(streamedFrames == 4);
+    assert(callbackCount == 2);
+    assert(rangeResult.interleavedStereo.empty());
 
     return 0;
 }
