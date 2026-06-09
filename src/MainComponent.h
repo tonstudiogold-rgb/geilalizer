@@ -77,10 +77,11 @@ private:
     juce::ComboBox exportSampleRate;
     juce::Label exportDepthLabel;
     juce::ComboBox exportBitDepth;
+    juce::ToggleButton renderFullSongToggle { "Use full song" };
     juce::Label renderStartLabel;
     juce::Slider renderStartSeconds;
-    juce::Label renderLengthLabel;
-    juce::Slider renderLengthSeconds;
+    juce::Label renderEndLabel;
+    juce::Slider renderEndSeconds;
     std::unique_ptr<MeterPlaceholder> masterMeter;
     juce::Label limiterActivityLabel;
 

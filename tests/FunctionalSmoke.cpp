@@ -75,9 +75,15 @@ int main()
     meter.pushPeak(1.25f);
     assert(meter.clipped());
     assert(meter.displayDb() <= 0.0f);
+    assert(meter.holdPeak() >= meter.displayPeak());
     meter.decay();
     assert(meter.displayPeak() < 1.0f);
+    assert(meter.holdPeak() >= meter.displayPeak());
     meter.resetClip();
+    assert(!meter.clipped());
+    meter.reset();
+    assert(meter.displayPeak() == 0.0f);
+    assert(meter.holdPeak() == 0.0f);
     assert(!meter.clipped());
 
     core::AudioEngine engine;
@@ -116,6 +122,36 @@ int main()
     assert(streamedFrames == 4);
     assert(callbackCount == 2);
     assert(rangeResult.interleavedStereo.empty());
+
+    rangeRequest.startFrame = 6;
+    rangeRequest.numFrames = 99;
+    streamedFrames = 0;
+    callbackCount = 0;
+    const auto clampedRangeResult = renderer.renderToSink(engine.session(), monoInputs, rangeRequest,
+        [&](const float*, std::size_t frames)
+        {
+            streamedFrames += frames;
+            ++callbackCount;
+            return true;
+        });
+    assert(clampedRangeResult.completed);
+    assert(streamedFrames == 2);
+    assert(callbackCount == 1);
+
+    rangeRequest.startFrame = 99;
+    rangeRequest.numFrames = 10;
+    streamedFrames = 0;
+    callbackCount = 0;
+    const auto emptyRangeResult = renderer.renderToSink(engine.session(), monoInputs, rangeRequest,
+        [&](const float*, std::size_t frames)
+        {
+            streamedFrames += frames;
+            ++callbackCount;
+            return true;
+        });
+    assert(emptyRangeResult.completed);
+    assert(streamedFrames == 0);
+    assert(callbackCount == 0);
 
     return 0;
 }

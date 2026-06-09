@@ -34,6 +34,11 @@ int peakToSegments(float peak)
     return juce::jlimit(0, 14, static_cast<int>(std::ceil(sanitisePeak(peak) * 14.0f)));
 }
 
+float dbToMeterPeak(float db)
+{
+    return std::pow(10.0f, juce::jlimit(-60.0f, 0.0f, db) / 20.0f);
+}
+
 void drawPanel(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title = {})
 {
     g.setGradientFill(juce::ColourGradient(panel.brighter(0.08f), area.getTopLeft().toFloat(),
@@ -50,25 +55,49 @@ void drawPanel(juce::Graphics& g, juce::Rectangle<int> area, const juce::String&
     }
 }
 
-void drawLedMeter(juce::Graphics& g, juce::Rectangle<int> area, int lit = 9, bool stereo = false)
+void drawDbScale(juce::Graphics& g, juce::Rectangle<int> area)
+{
+    g.setColour(muted.withAlpha(0.72f));
+    g.setFont(juce::FontOptions(7.5f));
+    for (const float db : { 0.0f, -6.0f, -12.0f, -24.0f, -48.0f })
+    {
+        const float norm = sanitisePeak(dbToMeterPeak(db));
+        const int y = area.getBottom() - static_cast<int>(std::round(norm * static_cast<float>(area.getHeight())));
+        g.drawHorizontalLine(y, static_cast<float>(area.getX()), static_cast<float>(area.getX() + 4));
+        g.drawText(juce::String(static_cast<int>(db)), area.getX() + 6, y - 5, area.getWidth() - 6, 10, juce::Justification::centredLeft);
+    }
+}
+
+void drawLedMeter(juce::Graphics& g, juce::Rectangle<int> area, int lit = 9, bool stereo = false, int holdLit = -1, bool showScale = false)
 {
     const int columns = stereo ? 2 : 1;
     const int gap = stereo ? 5 : 0;
-    const int colWidth = (area.getWidth() - gap) / columns;
+    auto meterArea = showScale ? area.withTrimmedRight(26) : area;
+    const int colWidth = (meterArea.getWidth() - gap) / columns;
+    int holdY = -1;
     for (int c = 0; c < columns; ++c)
     {
-        auto col = area.withX(area.getX() + c * (colWidth + gap)).withWidth(colWidth);
+        auto col = meterArea.withX(meterArea.getX() + c * (colWidth + gap)).withWidth(colWidth);
         const int segments = 14;
         const int segGap = 2;
         const int segH = juce::jmax(2, (col.getHeight() - (segments - 1) * segGap) / segments);
         for (int i = 0; i < segments; ++i)
         {
             const int y = col.getBottom() - (i + 1) * segH - i * segGap;
+            if (i == juce::jlimit(0, segments - 1, holdLit - 1))
+                holdY = y;
             auto colour = i > 11 ? juce::Colours::red : (i > 8 ? juce::Colours::yellow : juce::Colours::limegreen);
             g.setColour(colour.withAlpha(i < lit ? 0.9f : 0.18f));
             g.fillRoundedRectangle((float) col.getX(), (float) y, (float) col.getWidth(), (float) segH, 1.5f);
         }
     }
+    if (holdLit > 0 && holdY >= 0)
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.88f));
+        g.fillRect(meterArea.getX(), holdY - 1, meterArea.getWidth(), 2);
+    }
+    if (showScale)
+        drawDbScale(g, area.removeFromRight(24));
 }
 
 void drawTransportButton(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& label,
@@ -158,7 +187,8 @@ public:
         auto area = getLocalBounds().reduced(10, 12);
         const bool stereo = label.containsIgnoreCase("L / R");
         const int lit = stereo ? peakToSegments(std::max(left.displayPeak(), right.displayPeak())) : peakToSegments(left.displayPeak());
-        drawLedMeter(g, area.removeFromTop(area.getHeight() - 24), lit, stereo);
+        const int hold = stereo ? peakToSegments(std::max(left.holdPeak(), right.holdPeak())) : peakToSegments(left.holdPeak());
+        drawLedMeter(g, area.removeFromTop(area.getHeight() - 24), lit, stereo, hold, true);
         g.setColour(text.withAlpha(0.8f));
         g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
         g.drawText(label, area, juce::Justification::centred);
@@ -169,6 +199,13 @@ public:
         }
         left.decay();
         right.decay();
+    }
+
+    void mouseDown(const juce::MouseEvent&) override
+    {
+        left.resetClip();
+        right.resetClip();
+        repaint();
     }
 
 private:
@@ -309,8 +346,8 @@ public:
         g.setColour(text);
         g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
 
-        auto meterArea = juce::Rectangle<int>(7, 30, 13, 94);
-        drawLedMeter(g, meterArea, peakToSegments(meter.displayPeak()), false);
+        auto meterArea = juce::Rectangle<int>(7, 30, 18, 94);
+        drawLedMeter(g, meterArea, peakToSegments(meter.displayPeak()), false, peakToSegments(meter.holdPeak()), false);
 
         g.setColour(muted);
         g.setFont(juce::FontOptions(9.0f));
@@ -329,6 +366,15 @@ public:
             g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f);
             g.setColour(accent);
             g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 5.0f, 2.0f);
+        }
+    }
+
+    void mouseDown(const juce::MouseEvent& event) override
+    {
+        if (juce::Rectangle<int>(7, 30, 42, 100).contains(event.getPosition()))
+        {
+            meter.resetClip();
+            repaint();
         }
     }
 
@@ -500,18 +546,33 @@ MainComponent::MainComponent()
     renderStartSeconds.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 18);
     renderStartSeconds.setRange(0.0, 600.0, 0.1);
     renderStartSeconds.setTextValueSuffix(" s");
+    renderStartSeconds.onValueChange = [this] { repaint(); };
     addAndMakeVisible(renderStartSeconds);
 
-    renderLengthLabel.setText("LENGTH", juce::dontSendNotification);
-    renderLengthLabel.setJustificationType(juce::Justification::centred);
-    renderLengthLabel.setColour(juce::Label::textColourId, text);
-    addAndMakeVisible(renderLengthLabel);
-    renderLengthSeconds.setSliderStyle(juce::Slider::LinearHorizontal);
-    renderLengthSeconds.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 18);
-    renderLengthSeconds.setRange(0.0, 600.0, 0.1);
-    renderLengthSeconds.setTextValueSuffix(" s");
-    renderLengthSeconds.setValue(0.0, juce::dontSendNotification);
-    addAndMakeVisible(renderLengthSeconds);
+    renderFullSongToggle.setToggleState(true, juce::dontSendNotification);
+    renderFullSongToggle.setColour(juce::ToggleButton::textColourId, text);
+    renderFullSongToggle.onClick = [this]
+    {
+        const bool full = renderFullSongToggle.getToggleState();
+        renderStartSeconds.setEnabled(! full);
+        renderEndSeconds.setEnabled(! full);
+        repaint();
+    };
+    addAndMakeVisible(renderFullSongToggle);
+
+    renderEndLabel.setText("END", juce::dontSendNotification);
+    renderEndLabel.setJustificationType(juce::Justification::centred);
+    renderEndLabel.setColour(juce::Label::textColourId, text);
+    addAndMakeVisible(renderEndLabel);
+    renderEndSeconds.setSliderStyle(juce::Slider::LinearHorizontal);
+    renderEndSeconds.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 18);
+    renderEndSeconds.setRange(0.0, 600.0, 0.1);
+    renderEndSeconds.setTextValueSuffix(" s");
+    renderEndSeconds.setValue(0.0, juce::dontSendNotification);
+    renderEndSeconds.onValueChange = [this] { repaint(); };
+    renderEndSeconds.setEnabled(false);
+    renderStartSeconds.setEnabled(false);
+    addAndMakeVisible(renderEndSeconds);
 
     masterMeter = std::make_unique<MeterPlaceholder>("L / R");
     addAndMakeVisible(*masterMeter);
@@ -812,9 +873,12 @@ void MainComponent::showExportDialog()
         return;
     }
 
-    const double totalSeconds = deviceSampleRate > 0.0 ? static_cast<double>(maxLoadedFrames()) / deviceSampleRate : 0.0;
+    const auto loadedFrames = maxLoadedFrames();
+    const double totalSeconds = deviceSampleRate > 0.0 ? static_cast<double>(loadedFrames) / deviceSampleRate : 0.0;
     renderStartSeconds.setRange(0.0, totalSeconds, 0.1);
-    renderLengthSeconds.setRange(0.0, totalSeconds, 0.1);
+    renderEndSeconds.setRange(0.0, totalSeconds, 0.1);
+    if (renderEndSeconds.getValue() <= renderStartSeconds.getValue() || renderFullSongToggle.getToggleState())
+        renderEndSeconds.setValue(totalSeconds, juce::dontSendNotification);
 
     activeFileChooser = std::make_shared<juce::FileChooser>("Save Geilalizer render",
                                                             juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
@@ -830,10 +894,16 @@ void MainComponent::showExportDialog()
                 out = out.withFileExtension("wav");
             const double selectedRate = exportSampleRate.getSelectedId() == 1 ? 44100.0 : 48000.0;
             const int selectedDepth = exportBitDepth.getSelectedId() == 1 ? 16 : 24;
+            const bool fullLength = renderFullSongToggle.getToggleState();
+            const auto totalFrames = maxLoadedFrames();
             const auto startFrame = static_cast<std::size_t>(std::max(0.0, renderStartSeconds.getValue()) * deviceSampleRate);
-            const auto requestedFrames = static_cast<std::size_t>(std::max(0.0, renderLengthSeconds.getValue()) * deviceSampleRate);
-            const bool fullLength = requestedFrames == 0;
-            renderToFileAsync(out, selectedRate, selectedDepth, startFrame, requestedFrames, fullLength);
+            const auto endFrame = static_cast<std::size_t>(std::max(0.0, renderEndSeconds.getValue()) * deviceSampleRate);
+            const auto clampedStart = std::min(startFrame, totalFrames);
+            const auto clampedEnd = std::min(std::max(endFrame, clampedStart), totalFrames);
+            const auto requestedFrames = fullLength ? 0 : clampedEnd - clampedStart;
+            if (! fullLength && (clampedStart != startFrame || clampedEnd != endFrame || requestedFrames == 0))
+                setStatus("Render range clamped to loaded song length.");
+            renderToFileAsync(out, selectedRate, selectedDepth, clampedStart, requestedFrames, fullLength);
         });
 }
 
@@ -855,26 +925,30 @@ void MainComponent::renderToFileAsync(const juce::File& outputFile, double sampl
         juce::String message;
         bool ok = true;
         outputFile.deleteFile();
-        std::unique_ptr<juce::FileOutputStream> stream(outputFile.createOutputStream());
-        if (stream == nullptr || ! stream->openedOk())
+        auto fileStream = outputFile.createOutputStream();
+        if (fileStream == nullptr || ! fileStream->openedOk())
         {
             ok = false;
             message = "Output file cannot be opened.";
         }
 
+        std::unique_ptr<juce::OutputStream> stream;
+        if (ok)
+            stream = std::move(fileStream);
+
         std::unique_ptr<juce::AudioFormatWriter> writer;
         if (ok)
         {
             juce::WavAudioFormat wav;
-            writer.reset(wav.createWriterFor(stream.get(), sampleRate, 2u, bitDepth, {}, 0));
+            const auto options = juce::AudioFormatWriterOptions()
+                .withSampleRate(sampleRate)
+                .withNumChannels(2)
+                .withBitsPerSample(bitDepth);
+            writer = wav.createWriterFor(stream, options);
             if (writer == nullptr)
             {
                 ok = false;
                 message = "WAV writer could not be created.";
-            }
-            else
-            {
-                stream.release();
             }
         }
 
@@ -1091,8 +1165,11 @@ void MainComponent::paint(juce::Graphics& g)
     g.drawText("FORMAT   WAV", render.reduced(14, 28).removeFromTop(18), juce::Justification::centredLeft);
     g.drawText("RATE     " + renderRate, render.reduced(14, 46).removeFromTop(18), juce::Justification::centredLeft);
     g.drawText("DEPTH    " + renderDepth, render.reduced(14, 64).removeFromTop(18), juce::Justification::centredLeft);
-    const juce::String rangeText = renderLengthSeconds.getValue() <= 0.0 ? "FULL" : juce::String(renderStartSeconds.getValue(), 1) + "s + " + juce::String(renderLengthSeconds.getValue(), 1) + "s";
+    const bool manualRangeClamped = ! renderFullSongToggle.getToggleState() && renderEndSeconds.getValue() <= renderStartSeconds.getValue();
+    const juce::String rangeText = renderFullSongToggle.getToggleState() ? "FULL SONG" : juce::String(renderStartSeconds.getValue(), 1) + "s → " + juce::String(renderEndSeconds.getValue(), 1) + "s" + (manualRangeClamped ? "  CLAMPED" : "");
+    g.setColour(manualRangeClamped ? accent : text);
     g.drawText("RANGE    " + rangeText, render.reduced(14, 82).removeFromTop(18), juce::Justification::centredLeft);
+    g.setColour(text);
     drawTransportButton(g, render.withSizeKeepingCentre(120, 28).translated(0, 42), "RENDER", juce::Colour { 0xff5b5b5b });
 
     b.removeFromLeft(18);
@@ -1102,7 +1179,7 @@ void MainComponent::paint(juce::Graphics& g)
         const std::lock_guard<std::mutex> lock(trackMutex);
         lit = peakToSegments(std::max(audioEngine.session().master.meterLeftPeak, audioEngine.session().master.meterRightPeak));
     }
-    drawLedMeter(g, b.reduced(35, 34), lit, true);
+    drawLedMeter(g, b.reduced(30, 34), lit, true, lit, true);
 
     auto footer = bounds.removeFromTop(76);
     drawPanel(g, footer, {});
@@ -1160,8 +1237,10 @@ void MainComponent::resized()
     renderStartLabel.setBounds(m.removeFromTop(12));
     renderStartSeconds.setBounds(m.removeFromTop(22));
     m.removeFromTop(3);
-    renderLengthLabel.setBounds(m.removeFromTop(12));
-    renderLengthSeconds.setBounds(m.removeFromTop(22));
+    renderFullSongToggle.setBounds(m.removeFromTop(20));
+    m.removeFromTop(2);
+    renderEndLabel.setBounds(m.removeFromTop(12));
+    renderEndSeconds.setBounds(m.removeFromTop(22));
     m.removeFromTop(6);
     limiterToggle.setBounds(m.removeFromTop(22));
     limiterActivityLabel.setBounds(m.removeFromTop(42));
