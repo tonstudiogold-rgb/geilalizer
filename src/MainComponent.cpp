@@ -12,17 +12,18 @@
 
 namespace
 {
-constexpr int kContentWidth = 1400;
-constexpr int kContentHeight = 1060;
+constexpr int kContentWidth = 2020;
+constexpr int kContentHeight = 1460;
 constexpr int kDeckHeight = 205;
-constexpr int kChannelAreaHeight = 548;
-constexpr int kBottomAreaHeight = 150;
+constexpr int kChannelAreaHeight = 1098;
 constexpr int kFooterHeight = 76;
-constexpr int kStripWidth = 132;
-constexpr int kStripHeight = 132;
+constexpr int kStripWidth = 140;
+constexpr int kStripHeight = 478;
 constexpr int kStripGap = 7;
-constexpr int kBankHeaderHeight = 24;
-constexpr int kBankRowGap = 5;
+constexpr int kBankHeaderHeight = 28;
+constexpr int kBankRowGap = 8;
+constexpr int kBankCount = 2;
+constexpr int kChannelsPerBank = 12;
 
 const juce::Colour background { 0xff11100e };
 const auto panel = juce::Colour { 0xff202020 };
@@ -160,10 +161,15 @@ public:
         const bool stereo = label.containsIgnoreCase("L / R");
         const int lit = stereo ? peakToSegments(std::max(left.displayPeak(), right.displayPeak())) : peakToSegments(left.displayPeak());
         const int hold = stereo ? peakToSegments(std::max(left.holdPeak(), right.holdPeak())) : peakToSegments(left.holdPeak());
-        drawLedMeter(g, area.removeFromTop(area.getHeight() - 24), lit, stereo, hold, true);
+        drawLedMeter(g, area.removeFromTop(area.getHeight() - 30), lit, stereo, hold, true);
         g.setColour(text.withAlpha(0.8f));
-        g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-        g.drawText(label, area, juce::Justification::centred);
+        g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
+        g.drawText(stereo ? "L        R" : label, area.removeFromTop(14), juce::Justification::centred);
+        if (stereo)
+        {
+            g.setFont(juce::FontOptions(8.0f));
+            g.drawText("dB SCALE", area, juce::Justification::centred);
+        }
         if (left.clipped() || right.clipped())
         {
             g.setColour(red);
@@ -252,7 +258,7 @@ public:
         addAndMakeVisible(armButton);
 
         inputGain.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        inputGain.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 17);
+        inputGain.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 62, 18);
         inputGain.setRange(geilalizer::core::kInputGainMinDb, geilalizer::core::kInputGainMaxDb, 0.1);
         inputGain.setValue(geilalizer::core::kDefaultInputGainDb, juce::dontSendNotification);
         inputGain.setTextValueSuffix(" dB");
@@ -264,7 +270,7 @@ public:
         addAndMakeVisible(inputGain);
 
         fader.setSliderStyle(juce::Slider::LinearVertical);
-        fader.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        fader.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 58, 18);
         fader.setRange(geilalizer::core::kFaderGainMinDb, geilalizer::core::kFaderGainMaxDb, 0.1);
         fader.setValue(geilalizer::core::kDefaultFaderGainDb, juce::dontSendNotification);
         fader.onValueChange = [this]
@@ -274,14 +280,16 @@ public:
         };
         addAndMakeVisible(fader);
 
-        pan.setSliderStyle(juce::Slider::LinearHorizontal);
+        pan.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         pan.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
         pan.setRange(-1.0, 1.0, 0.01);
         pan.setValue(0.0, juce::dontSendNotification);
         pan.onValueChange = [this]
         {
             const std::lock_guard<std::mutex> lock(owner.trackMutex);
-            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setPan(static_cast<float>(pan.getValue()));
+            if (std::abs(pan.getValue()) > 0.0001)
+                pan.setValue(0.0, juce::dontSendNotification);
+            owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setPan(0.0f);
         };
         addAndMakeVisible(pan);
 
@@ -389,18 +397,24 @@ public:
         g.setColour(text);
         g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
 
-        auto meterArea = juce::Rectangle<int>(7, 30, 18, 94);
+        auto meterArea = juce::Rectangle<int>(86, 260, 30, 145);
         drawLedMeter(g, meterArea, peakToSegments(meter.displayPeak()), false, peakToSegments(meter.holdPeak()), false);
 
         g.setColour(muted);
         g.setFont(juce::FontOptions(9.0f));
-        g.drawText("PEAK", 24, 31, getWidth() - 28, 14, juce::Justification::centred);
+        g.drawText("PRE", 10, 75, 70, 13, juce::Justification::centred);
+        g.drawText("PEAK", 80, 244, 42, 14, juce::Justification::centred);
         g.setColour(loaded ? green : red.withAlpha(0.45f));
-        g.fillEllipse(31.0f, 50.0f, 5.0f, 5.0f);
+        g.fillEllipse(78.0f, 264.0f, 6.0f, 6.0f);
         g.setColour(meter.clipped() ? red : muted);
-        g.setFont(juce::FontOptions(8.0f, juce::Font::bold));
+        g.setFont(juce::FontOptions(8.5f, juce::Font::bold));
         g.drawText(meter.clipped() ? "CLIP" : juce::String(meter.displayDb(), 0) + " dB",
-                   22, 72, getWidth() - 26, 12, juce::Justification::centred);
+                   76, 278, 52, 13, juce::Justification::centred);
+        g.setColour(muted);
+        g.setFont(juce::FontOptions(9.0f));
+        g.drawText("PAN", 14, 159, 62, 13, juce::Justification::centred);
+        g.drawText("CENTER", 14, 214, 62, 12, juce::Justification::centred);
+        g.drawText("FADER", 14, 244, 54, 13, juce::Justification::centred);
         meter.decay();
 
         if (dragging)
@@ -423,15 +437,20 @@ public:
 
     void resized() override
     {
-        nameEditor.setBounds(24, 6, getWidth() - 30, 18);
-        inputLabel.setBounds(14, 27, getWidth() - 20, 12);
-        inputSelect.setBounds(10, 40, getWidth() - 16, 20);
-        inputGain.setBounds(20, 62, 42, 42);
-        fader.setBounds(getWidth() - 24, 48, 18, 66);
-        pan.setBounds(24, 108, getWidth() - 34, 14);
-        armButton.setBounds(8, getHeight() - 52, getWidth() - 16, 18);
-        muteButton.setBounds(8, getHeight() - 30, (getWidth() - 20) / 2, 18);
-        soloButton.setBounds(12 + (getWidth() - 20) / 2, getHeight() - 30, (getWidth() - 20) / 2, 18);
+        const auto w = getWidth();
+        nameEditor.setBounds(8, 7, w - 16, 20);
+        inputLabel.setBounds(8, 31, w - 16, 12);
+        inputSelect.setBounds(8, 45, w - 16, 24);
+
+        inputGain.setBounds(10, 88, 70, 68);
+        pan.setBounds(20, 172, 50, 50);
+        fader.setBounds(14, 260, 54, 155);
+
+        armButton.setBounds(8, 425, w - 16, 22);
+        auto buttons = juce::Rectangle<int>(8, 450, w - 16, 20);
+        muteButton.setBounds(buttons.removeFromLeft((buttons.getWidth() - 6) / 2));
+        buttons.removeFromLeft(6);
+        soloButton.setBounds(buttons);
     }
 
 private:
@@ -533,11 +552,11 @@ MainComponent::MainComponent()
     channelViewport.setScrollOnDragMode(juce::Viewport::ScrollOnDragMode::all);
     addAndMakeVisible(channelViewport);
 
-    for (int bank = 0; bank < 3; ++bank)
+    for (int bank = 0; bank < kBankCount; ++bank)
     {
         auto& toggle = bankToggles[static_cast<std::size_t>(bank)];
         toggle.setButtonText("BANK " + juce::String::charToString(static_cast<juce::juce_wchar>('A' + bank))
-                             + " | CH " + juce::String(bank * 8 + 1) + "-" + juce::String(bank * 8 + 8));
+                             + " | CH " + juce::String(bank * kChannelsPerBank + 1) + "-" + juce::String(bank * kChannelsPerBank + kChannelsPerBank));
         toggle.setToggleState(true, juce::dontSendNotification);
         toggle.setColour(juce::ToggleButton::textColourId, text);
         toggle.onClick = [this, bank]
@@ -546,7 +565,7 @@ MainComponent::MainComponent()
             resized();
             repaint();
         };
-        addAndMakeVisible(toggle);
+        channelContainer.addAndMakeVisible(toggle);
     }
 
     for (int i = 1; i <= channelCount; ++i)
@@ -555,9 +574,7 @@ MainComponent::MainComponent()
         channelContainer.addAndMakeVisible(strip);
     }
 
-    addAndMakeVisible(masterGroup);
-    masterGroup.setText("MASTER");
-    masterGroup.setColour(juce::GroupComponent::textColourId, text);
+    masterGroup.setVisible(false);
 
     limiterToggle.setButtonText("LIMITER ON");
     limiterToggle.setToggleState(true, juce::dontSendNotification);
@@ -571,10 +588,11 @@ MainComponent::MainComponent()
 
     outputTrimLabel.setText("OUTPUT", juce::dontSendNotification);
     outputTrimLabel.setJustificationType(juce::Justification::centred);
+    outputTrimLabel.setFont(juce::FontOptions(18.0f, juce::Font::bold));
     outputTrimLabel.setColour(juce::Label::textColourId, text);
     addAndMakeVisible(outputTrimLabel);
     outputTrim.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    outputTrim.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 20);
+    outputTrim.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 78, 22);
     outputTrim.setRange(-12.0, 12.0, 0.1);
     outputTrim.setValue(0.0, juce::dontSendNotification);
     outputTrim.setTextValueSuffix(" dB");
@@ -646,10 +664,8 @@ MainComponent::MainComponent()
     masterMeter = std::make_unique<MeterPlaceholder>("L / R");
     addAndMakeVisible(*masterMeter);
 
-    limiterActivityLabel.setText("MONITOR: STEREO  |  15 IPS", juce::dontSendNotification);
-    limiterActivityLabel.setJustificationType(juce::Justification::centred);
-    limiterActivityLabel.setColour(juce::Label::backgroundColourId, juce::Colours::black.withAlpha(0.35f));
-    limiterActivityLabel.setColour(juce::Label::textColourId, accent);
+    limiterActivityLabel.setText({}, juce::dontSendNotification);
+    limiterActivityLabel.setVisible(false);
     addAndMakeVisible(limiterActivityLabel);
 
     auto& lf = getLookAndFeel();
@@ -1202,10 +1218,7 @@ void MainComponent::refreshMasterVisuals()
         masterMeter->setLevels(master.meterLeftPeak, master.meterRightPeak);
     limiterToggle.setToggleState(master.limiterEnabled, juce::dontSendNotification);
     outputTrim.setValue(master.outputTrimDb, juce::dontSendNotification);
-    const juce::String mode = recording.load() ? "REC" : (playing.load() ? "PLAY" : "STOP");
-    limiterActivityLabel.setText(mode + juce::String("  |  ")
-                                 + (master.limiterActive ? "LIMITER ACTIVE" : "LIMITER READY")
-                                 + "  |  15 IPS", juce::dontSendNotification);
+    (void) master.limiterActive;
 }
 
 void MainComponent::setStatus(juce::String message)
@@ -1265,47 +1278,6 @@ void MainComponent::paint(juce::Graphics& g)
     auto channelArea = bounds.removeFromTop(kChannelAreaHeight);
     drawPanel(g, channelArea, "24-TRACK CHANNELS");
 
-    bounds.removeFromTop(10);
-    auto bottom = bounds.removeFromTop(kBottomAreaHeight);
-    drawPanel(g, bottom, "MASTER CONTROL & RENDER");
-    auto b = bottom.reduced(18, 34);
-    auto time = b.removeFromLeft(190);
-    drawPanel(g, time, "TIME / POSITION");
-    g.setColour(text);
-    g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-    g.drawText(currentTimeText(), time.reduced(14, 32), juce::Justification::centred);
-
-    b.removeFromLeft(18);
-    auto project = b.removeFromLeft(230);
-    drawPanel(g, project, "PROJECT");
-    g.setColour(text);
-    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.drawText(projectName, project.reduced(14, 28).removeFromTop(22), juce::Justification::centred);
-    g.setFont(juce::FontOptions(10.0f));
-    g.drawText(juce::String(deviceSampleRate / 1000.0, 1) + " kHz  |  24 Bit  |  15 IPS", project.reduced(14, 54).removeFromTop(20), juce::Justification::centred);
-
-    b.removeFromLeft(18);
-    auto render = b.removeFromLeft(200);
-    drawPanel(g, render, "RENDER / EXPORT");
-    g.setColour(text);
-    g.setFont(juce::FontOptions(11.0f));
-    const juce::String renderRate = exportSampleRate.getSelectedId() == 1 ? "44.1 kHz" : "48 kHz";
-    const juce::String renderDepth = exportBitDepth.getSelectedId() == 1 ? "16 Bit" : "24 Bit";
-    g.drawText("FORMAT   WAV", render.getX() + 14, render.getY() + 28, render.getWidth() - 28, 15, juce::Justification::centredLeft);
-    g.drawText("RATE     " + renderRate, render.getX() + 14, render.getY() + 43, render.getWidth() - 28, 15, juce::Justification::centredLeft);
-    g.drawText("DEPTH    " + renderDepth, render.getX() + 14, render.getY() + 58, render.getWidth() - 28, 15, juce::Justification::centredLeft);
-    g.drawText(renderFullSongToggle.getToggleState() ? "RANGE    FULL SONG" : "RANGE    MANUAL", render.getX() + 14, render.getY() + 73, render.getWidth() - 28, 15, juce::Justification::centredLeft);
-    g.setColour(text);
-
-    b.removeFromLeft(18);
-    drawPanel(g, b, "OUTPUT METERS");
-    int lit = 0;
-    {
-        const std::lock_guard<std::mutex> lock(trackMutex);
-        lit = peakToSegments(std::max(audioEngine.session().master.meterLeftPeak, audioEngine.session().master.meterRightPeak));
-    }
-    drawLedMeter(g, b.reduced(30, 34), lit, true, lit, true);
-
     auto footer = bounds.removeFromTop(kFooterHeight);
     drawPanel(g, footer, {});
     juce::String status;
@@ -1331,24 +1303,27 @@ void MainComponent::resized()
 
     bounds.removeFromTop(kDeckHeight);
     auto channelPanel = bounds.removeFromTop(kChannelAreaHeight).reduced(16, 30);
-    auto masterArea = channelPanel.removeFromRight(122);
-    channelPanel.removeFromRight(8);
+    auto masterArea = channelPanel.removeFromRight(150);
+    channelPanel.removeFromRight(12);
 
     channelViewport.setBounds(channelPanel);
-    const int cols = 8;
+    const int cols = kChannelsPerBank;
+    const int containerWidth = cols * (kStripWidth + kStripGap) + kStripGap;
     int y = 0;
-    for (int bank = 0; bank < 3; ++bank)
+    for (int bank = 0; bank < kBankCount; ++bank)
     {
-        bankToggles[static_cast<std::size_t>(bank)].setBounds(channelPanel.getX(), channelPanel.getY() + y, channelPanel.getWidth() - 18, kBankHeaderHeight);
+        auto& toggle = bankToggles[static_cast<std::size_t>(bank)];
+        toggle.setBounds(kStripGap, y, containerWidth - 2 * kStripGap, kBankHeaderHeight);
         y += kBankHeaderHeight;
         if (! bankOpen[static_cast<std::size_t>(bank)])
         {
-            for (int i = bank * 8; i < bank * 8 + 8; ++i)
+            for (int i = bank * kChannelsPerBank; i < bank * kChannelsPerBank + kChannelsPerBank; ++i)
                 channels[i]->setVisible(false);
-            y += 4;
+            y += kBankRowGap;
             continue;
         }
-        for (int i = bank * 8; i < bank * 8 + 8; ++i)
+        y += 4;
+        for (int i = bank * kChannelsPerBank; i < bank * kChannelsPerBank + kChannelsPerBank; ++i)
         {
             const int col = i % cols;
             channels[i]->setVisible(true);
@@ -1356,30 +1331,47 @@ void MainComponent::resized()
         }
         y += kStripHeight + kBankRowGap;
     }
-    channelContainer.setBounds(0, 0, cols * (kStripWidth + kStripGap) + kStripGap, y + 2);
+    channelContainer.setBounds(0, 0, containerWidth, y + 2);
 
     masterGroup.setBounds(masterArea);
-    auto m = masterArea.reduced(12, 26);
+    const int firstBankStripTop = masterArea.getY() + kBankHeaderHeight + 4;
+    const int secondBankStripTop = firstBankStripTop + kStripHeight + kBankRowGap + kBankHeaderHeight + 4;
+    auto masterMeterArea = juce::Rectangle<int>(masterArea.getX() + 12,
+                                                 firstBankStripTop,
+                                                 masterArea.getWidth() - 24,
+                                                 kStripHeight);
     if (masterMeter != nullptr)
-        masterMeter->setBounds(m.removeFromTop(112));
-    m.removeFromTop(6);
-    outputTrimLabel.setBounds(m.removeFromTop(16));
-    outputTrim.setBounds(m.removeFromTop(54));
-    m.removeFromTop(4);
-    exportRateLabel.setBounds(m.removeFromTop(14));
-    exportSampleRate.setBounds(m.removeFromTop(24));
-    m.removeFromTop(4);
-    exportDepthLabel.setBounds(m.removeFromTop(14));
-    exportBitDepth.setBounds(m.removeFromTop(24));
-    m.removeFromTop(4);
-    renderStartLabel.setBounds(m.removeFromTop(0));
-    renderStartSeconds.setBounds(m.removeFromTop(0));
-    renderFullSongToggle.setBounds(m.removeFromTop(20));
-    renderEndLabel.setBounds(m.removeFromTop(0));
-    renderEndSeconds.setBounds(m.removeFromTop(0));
-    m.removeFromTop(4);
-    limiterToggle.setBounds(m.removeFromTop(22));
-    limiterActivityLabel.setBounds(m.removeFromTop(42));
+        masterMeter->setBounds(masterMeterArea);
+
+    auto bankBControls = juce::Rectangle<int>(masterArea.getX() + 12,
+                                              secondBankStripTop,
+                                              masterArea.getWidth() - 24,
+                                              kStripHeight);
+    const int slot = bankBControls.getHeight() / 5;
+    const int x = bankBControls.getX();
+    const int w = bankBControls.getWidth();
+
+    outputTrimLabel.setBounds(x, bankBControls.getY() + 24, w, 24);
+    outputTrim.setBounds(x + 12, bankBControls.getY() + 45, w - 24, 91);
+
+    const int rateLabelTop = bankBControls.getY() + 244;
+    exportRateLabel.setBounds(x, rateLabelTop, w, 16);
+    exportSampleRate.setBounds(x, rateLabelTop + 24, w, 28);
+
+    const int bitDepthBoxHeight = 28;
+    const int bitDepthLabelTop = rateLabelTop + 64;
+    exportDepthLabel.setBounds(x, bitDepthLabelTop, w, 16);
+    exportBitDepth.setBounds(x, bitDepthLabelTop + 24, w, bitDepthBoxHeight);
+
+    renderStartLabel.setBounds({});
+    renderStartSeconds.setBounds({});
+    renderFullSongToggle.setBounds(x, bankBControls.getY() + 425, w, 24);
+    renderEndLabel.setBounds({});
+    renderEndSeconds.setBounds({});
+
+    auto limiterSlot = juce::Rectangle<int>(x, bankBControls.getY() + slot * 4, w, bankBControls.getHeight() - slot * 4);
+    limiterActivityLabel.setBounds({});
+    limiterToggle.setBounds(x, limiterSlot.getBottom() - 28, w, 24);
 
     auto local = getLocalBounds().reduced(16);
     local.removeFromTop(32);

@@ -74,8 +74,8 @@ private:
 
     juce::Viewport channelViewport;
     juce::Component channelContainer;
-    std::array<juce::ToggleButton, 3> bankToggles;
-    std::array<bool, 3> bankOpen { true, true, true };
+    std::array<juce::ToggleButton, 2> bankToggles;
+    std::array<bool, 2> bankOpen { true, true };
     juce::OwnedArray<ChannelStrip> channels;
 
     juce::GroupComponent masterGroup { {}, "Master" };
