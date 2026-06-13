@@ -52,6 +52,9 @@ int main()
 
     dsp::MachineProcessor processor;
     processor.prepare(48000.0, static_cast<int>(monoInputs[0].size()));
+    const bool hasPrivateAssets = processor.irAdapter().hasAnyIr()
+        && processor.postFaderIrAdapter().hasAllFaderThirdIrs()
+        && processor.mixbusIrAdapter().hasAllMixbusIrs();
     processor.setStageProbeEnabled(true);
 
     dsp::AudioBlockView block { &monoInputs, &out, monoInputs[0].size() };
@@ -88,9 +91,12 @@ int main()
         assert(std::isfinite(probe.deltaRms));
     }
 
-    assert(stage(probes, "channel 1 preamp IR").changed());
-    assert(stage(probes, "channel 1 post-fader IR").changed());
-    assert(stage(probes, "mixbus IR").changed());
+    if (hasPrivateAssets)
+    {
+        assert(stage(probes, "channel 1 preamp IR").changed());
+        assert(stage(probes, "channel 1 post-fader IR").changed());
+        assert(stage(probes, "mixbus IR").changed());
+    }
 
     processor.setStageProbeEnabled(false);
     std::fill(out.begin(), out.end(), 0.0f);

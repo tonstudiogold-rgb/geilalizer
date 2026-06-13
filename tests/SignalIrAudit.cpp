@@ -113,24 +113,39 @@ int main()
     const auto& preampProbe = requireStage(probes, prefix + "preamp IR");
     const auto& postFaderProbe = requireStage(probes, prefix + "post-fader IR");
     const auto& mixbusProbe = requireStage(probes, "mixbus IR");
-    assert(preampProbe.changed());
-    assert(postFaderProbe.changed());
-    assert(mixbusProbe.changed());
+    const bool hasPrivateAssets = processor.irAdapter().hasAnyIr()
+        && processor.postFaderIrAdapter().hasAllFaderThirdIrs()
+        && processor.mixbusIrAdapter().hasAllMixbusIrs();
+    if (hasPrivateAssets)
+    {
+        assert(preampProbe.changed());
+        assert(postFaderProbe.changed());
+        assert(mixbusProbe.changed());
+    }
 
     const auto& preampSlot = processor.irAdapter().preampIrSlots().at(static_cast<std::size_t>(preampIndex));
-    assert(!preampSlot.fileName.empty());
-    assert(!preampSlot.monoTaps.empty());
+    if (hasPrivateAssets)
+    {
+        assert(!preampSlot.fileName.empty());
+        assert(!preampSlot.monoTaps.empty());
+    }
 
     const int postFaderSlotIndex = processor.postFaderIrAdapter().slotIndexForFaderDb(channel.faderGainDb);
     const auto& postFaderSlot = processor.postFaderIrAdapter().slots().at(static_cast<std::size_t>(postFaderSlotIndex));
-    assert(!postFaderSlot.fileName.empty());
-    assert(!postFaderSlot.monoTaps.empty());
+    if (hasPrivateAssets)
+    {
+        assert(!postFaderSlot.fileName.empty());
+        assert(!postFaderSlot.monoTaps.empty());
+    }
 
     const int mixbusSlotIndex = processor.mixbusIrAdapter().activeSlotIndex();
     const auto& mixbusSlot = processor.mixbusIrAdapter().slots().at(static_cast<std::size_t>(mixbusSlotIndex));
-    assert(!mixbusSlot.fileName.empty());
-    assert(!mixbusSlot.leftTaps.empty());
-    assert(!mixbusSlot.rightTaps.empty());
+    if (hasPrivateAssets)
+    {
+        assert(!mixbusSlot.fileName.empty());
+        assert(!mixbusSlot.leftTaps.empty());
+        assert(!mixbusSlot.rightTaps.empty());
+    }
 
     const auto& meters = processor.lastMeters();
     assert(std::isfinite(meters.mixbusPreLimiterPeakDb));
@@ -139,7 +154,7 @@ int main()
     assert(meters.masterLeftPeak > 0.0f || meters.masterRightPeak > 0.0f);
 
     std::cout << std::fixed << std::setprecision(6);
-    std::cout << "Geilalizer Signal-/IR-Audit: PASS\n";
+    std::cout << "Geilalizer Signal-/IR-Audit: PASS" << (hasPrivateAssets ? "" : " (Fallback ohne private Assets)") << "\n";
     std::cout << "Pfad: Channel " << channelNumber << " -> Mixbus/Master -> Stereo Out\n";
     std::cout << "Aktive IRs:\n";
     std::cout << "  Channel " << channelNumber << " Preamp IR: Slot " << preampIndex

@@ -30,7 +30,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     FetchContent_Declare(
         NeuralAmpModelerCore
         GIT_REPOSITORY https://github.com/sdatkinson/NeuralAmpModelerCore.git
-        GIT_TAG main
+        GIT_TAG e49c93e678549230d09efbb0beeb50511e387874
         GIT_SHALLOW TRUE
         GIT_SUBMODULES_RECURSE TRUE)
     FetchContent_MakeAvailable(NeuralAmpModelerCore)
@@ -189,6 +189,9 @@ add_executable(SignalIrAudit
 add_executable(TapeMachineBehavior
     tests/TapeMachineBehavior.cpp)
 
+add_executable(RepositoryPolicySmoke
+    tests/RepositoryPolicySmoke.cpp)
+
 if(GEILALIZER_BUILD_JUCE_APP)
     add_executable(OfflineRenderSlice
         tests/OfflineRenderSlice.cpp
@@ -214,6 +217,7 @@ target_include_directories(SignalIrAudit PRIVATE src)
 target_compile_features(SignalIrAudit PRIVATE cxx_std_20)
 target_include_directories(TapeMachineBehavior PRIVATE src)
 target_compile_features(TapeMachineBehavior PRIVATE cxx_std_20)
+target_compile_features(RepositoryPolicySmoke PRIVATE cxx_std_20)
 if(GEILALIZER_BUILD_JUCE_APP)
     target_include_directories(OfflineRenderSlice PRIVATE src)
     target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
@@ -265,9 +269,12 @@ add_test(NAME FunctionalSmoke COMMAND FunctionalSmoke)
 add_test(NAME SignalChainProbeSmoke COMMAND SignalChainProbeSmoke)
 add_test(NAME SignalIrAudit COMMAND SignalIrAudit)
 add_test(NAME TapeMachineBehavior COMMAND TapeMachineBehavior)
+add_test(NAME RepositoryPolicySmoke COMMAND RepositoryPolicySmoke)
 if(GEILALIZER_BUILD_JUCE_APP)
     add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
 endif()
+set_tests_properties(RepositoryPolicySmoke PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke SignalChainProbeSmoke SignalIrAudit PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
