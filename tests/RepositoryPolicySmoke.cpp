@@ -52,5 +52,39 @@ int main()
         return 1;
     }
 
+    const auto gitignore = readFile(root / ".gitignore");
+    if (gitignore.find("private_nam_models/") == std::string::npos)
+    {
+        std::cerr << ".gitignore must explicitly ignore private_nam_models/.\n";
+        return 1;
+    }
+    if (gitignore.find("*.nam") == std::string::npos)
+    {
+        std::cerr << ".gitignore must explicitly ignore *.nam.\n";
+        return 1;
+    }
+
+    if (cmake.find("option(GEILALIZER_BUNDLE_PRIVATE_MODELS") == std::string::npos)
+    {
+        std::cerr << "CMake must gate private model bundling behind GEILALIZER_BUNDLE_PRIVATE_MODELS.\n";
+        return 1;
+    }
+    const std::regex bundlingOptionOffByDefault(
+        R"(option\s*\(\s*GEILALIZER_BUNDLE_PRIVATE_MODELS[\s\S]*?OFF\s*\))");
+    if (! std::regex_search(cmake, bundlingOptionOffByDefault))
+    {
+        std::cerr << "GEILALIZER_BUNDLE_PRIVATE_MODELS must default to OFF.\n";
+        return 1;
+    }
+
+    const auto optionGuard = cmake.find("if(GEILALIZER_BUNDLE_PRIVATE_MODELS AND EXISTS");
+    const auto copyDirectory = cmake.find("copy_directory", optionGuard == std::string::npos ? 0 : optionGuard);
+    const auto guardedPrivatePath = cmake.find("private_nam_models", optionGuard == std::string::npos ? 0 : optionGuard);
+    if (optionGuard == std::string::npos || copyDirectory == std::string::npos || guardedPrivatePath == std::string::npos || copyDirectory < optionGuard || guardedPrivatePath < optionGuard)
+    {
+        std::cerr << "private_nam_models copy must be guarded by GEILALIZER_BUNDLE_PRIVATE_MODELS.\n";
+        return 1;
+    }
+
     return 0;
 }

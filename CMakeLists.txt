@@ -16,6 +16,7 @@ set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 set(JUCE_ENABLE_MODULE_SOURCE_GROUPS ON CACHE BOOL "" FORCE)
 option(GEILALIZER_ENABLE_NAMCORE "Build hidden NAM stages with NeuralAmpModelerCore" ON)
 option(GEILALIZER_BUILD_JUCE_APP "Build the JUCE standalone GUI app" ON)
+option(GEILALIZER_BUNDLE_PRIVATE_MODELS "Copy local private_nam_models into app bundles. OFF for all public/release builds." OFF)
 
 if(GEILALIZER_BUILD_JUCE_APP)
     FetchContent_Declare(
@@ -121,7 +122,8 @@ target_link_libraries(Geilalizer
             XCODE_ATTRIBUTE_MACOSX_DEPLOYMENT_TARGET "12.0")
     endif()
 
-    if(EXISTS "${CMAKE_SOURCE_DIR}/private_nam_models")
+    if(GEILALIZER_BUNDLE_PRIVATE_MODELS AND EXISTS "${CMAKE_SOURCE_DIR}/private_nam_models")
+        message(WARNING "GEILALIZER_BUNDLE_PRIVATE_MODELS is ON: private_nam_models will be copied into this local app bundle. Never use this for public releases.")
         if(APPLE)
             add_custom_command(TARGET Geilalizer POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_directory
