@@ -36,6 +36,7 @@ public:
     int slotIndexForPeakDb(float peakDb) const;
     const IrSlot& slotForPeakDb(float peakDb) const;
     const std::array<IrSlot, kSlotCount>& slots() const { return slots_; }
+    void setSlots(std::array<IrSlot, kSlotCount> slots);
     int activeSlotIndex() const { return activeSlotIndex_; }
 
     void processInterleavedStereo(float peakDbBeforePreLimiter, float* samples, std::size_t numFrames);

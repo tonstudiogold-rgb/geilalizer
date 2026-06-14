@@ -43,6 +43,26 @@ public:
         bool changed(float threshold = 1.0e-6f) const { return deltaRms > threshold; }
     };
 
+    struct PreparedMachineState
+    {
+        std::array<HiddenIrAdapter::IrSlot, 11> preampIrSlots;
+        std::array<HiddenPostFaderIrAdapter::IrSlot, HiddenPostFaderIrAdapter::kSlotCount> postFaderIrSlots;
+        std::array<HiddenMixbusIrAdapter::IrSlot, HiddenMixbusIrAdapter::kSlotCount> mixbusIrSlots;
+        HiddenNamAdapter::Request consoleNam;
+        HiddenNamAdapter::Request tapeNam;
+        HiddenNamAdapter::Request emtLimiterNam;
+        HiddenNamAdapter::Request finalHiloNam;
+        bool consoleNamAvailable = false;
+        bool tapeNamAvailable = false;
+        bool emtLimiterNamAvailable = false;
+        bool finalHiloNamAvailable = false;
+    };
+
+    // Asset/model discovery and file loading must happen off the CoreAudio/JUCE prepare path.
+    // Call this from a background/non-realtime context, then apply the result from a safe thread.
+    static PreparedMachineState loadDefaultAssetsOffAudioThread();
+    void applyPreparedMachineState(PreparedMachineState state);
+
     void prepare(double sampleRate, int maxBlockSize);
     void reset();
 

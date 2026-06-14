@@ -105,6 +105,13 @@ bool HiddenMixbusIrAdapter::hasAllMixbusIrs() const
     });
 }
 
+void HiddenMixbusIrAdapter::setSlots(std::array<IrSlot, kSlotCount> slots)
+{
+    slots_ = std::move(slots);
+    leftConvolver_.reset();
+    rightConvolver_.reset();
+}
+
 int HiddenMixbusIrAdapter::slotIndexForPeakDb(float peakDb) const
 {
     if (!std::isfinite(peakDb))

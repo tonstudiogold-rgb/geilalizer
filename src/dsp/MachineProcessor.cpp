@@ -74,6 +74,90 @@ const char* fixedFinalHiloNamModelPath()
 }
 } // namespace
 
+void MachineProcessor::applyPreparedMachineState(PreparedMachineState state)
+{
+    irAdapter_.setPreampIrSlots(std::move(state.preampIrSlots));
+    postFaderIrAdapter_.setSlots(std::move(state.postFaderIrSlots));
+    mixbusIrAdapter_.setSlots(std::move(state.mixbusIrSlots));
+
+    if (state.consoleNamAvailable)
+        namAdapter_.bindFixedInternalModelForAllChannels(state.consoleNam);
+
+    if (state.tapeNamAvailable)
+    {
+        tapeNamAdapter_.bindFixedInternalModelForAllChannels(state.tapeNam);
+        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
+            0, { state.tapeNam.modelIdentifier, "fixed hidden Studer C37 tape NAM again on left mixbus after Model 5" });
+        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
+            1, { state.tapeNam.modelIdentifier, "fixed hidden Studer C37 tape NAM again on right mixbus after Model 5" });
+    }
+
+    if (state.emtLimiterNamAvailable)
+    {
+        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(0, state.emtLimiterNam);
+        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(
+            1, { state.emtLimiterNam.modelIdentifier, "switchable hidden EMT 266X NAM limiter on right master bus" });
+    }
+
+    if (state.finalHiloNamAvailable)
+    {
+        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(0, state.finalHiloNam);
+        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(
+            1, { state.finalHiloNam.modelIdentifier, "fixed final Hilo NAM 1 on right output after post-EMT safety limiter" });
+    }
+}
+
+MachineProcessor::PreparedMachineState MachineProcessor::loadDefaultAssetsOffAudioThread()
+{
+    PreparedMachineState state;
+
+    HiddenIrAdapter preampLoader;
+    preampLoader.loadNeve1073DirectoryIfPresent();
+    state.preampIrSlots = preampLoader.preampIrSlots();
+
+    HiddenPostFaderIrAdapter postFaderLoader;
+    postFaderLoader.loadSsl4000GDirectoryIfPresent();
+    state.postFaderIrSlots = postFaderLoader.slots();
+
+    HiddenMixbusIrAdapter mixbusLoader;
+    mixbusLoader.loadMixbusDirectoryIfPresent();
+    state.mixbusIrSlots = mixbusLoader.slots();
+
+    const std::filesystem::path fixedConsoleNamPath = resolveProductAssetPath(fixedConsoleNamModelPath());
+    if (std::filesystem::exists(fixedConsoleNamPath))
+    {
+        state.consoleNamAvailable = true;
+        state.consoleNam = { fixedConsoleNamPath.string(),
+            "fixed hidden Neve/console NAM after selected IR and before tape/fader coloration stages" };
+    }
+
+    const std::filesystem::path fixedTapeNamPath = resolveProductAssetPath(fixedTapeNamModelPath());
+    if (std::filesystem::exists(fixedTapeNamPath))
+    {
+        state.tapeNamAvailable = true;
+        state.tapeNam = { fixedTapeNamPath.string(),
+            "fixed hidden Studer C37 tape NAM after console NAM and before fader coloration stages" };
+    }
+
+    const std::filesystem::path fixedEmtLimiterNamPath = resolveProductAssetPath(fixedEmtLimiterNamModelPath());
+    if (std::filesystem::exists(fixedEmtLimiterNamPath))
+    {
+        state.emtLimiterNamAvailable = true;
+        state.emtLimiterNam = { fixedEmtLimiterNamPath.string(),
+            "switchable hidden EMT 266X NAM limiter on left master bus" };
+    }
+
+    const std::filesystem::path fixedFinalHiloNamPath = resolveProductAssetPath(fixedFinalHiloNamModelPath());
+    if (std::filesystem::exists(fixedFinalHiloNamPath))
+    {
+        state.finalHiloNamAvailable = true;
+        state.finalHiloNam = { fixedFinalHiloNamPath.string(),
+            "fixed final Hilo NAM 1 on left output after post-EMT safety limiter" };
+    }
+
+    return state;
+}
+
 void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
 {
     sampleRate_ = sampleRate > 0.0 ? sampleRate : 44100.0;
@@ -90,47 +174,6 @@ void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
     irAdapter_.prepare(sampleRate_, maxBlockSize_);
     postFaderIrAdapter_.prepare(sampleRate_, maxBlockSize_);
     mixbusIrAdapter_.prepare(sampleRate_, maxBlockSize_);
-    irAdapter_.loadNeve1073DirectoryIfPresent();
-    postFaderIrAdapter_.loadSsl4000GDirectoryIfPresent();
-    mixbusIrAdapter_.loadMixbusDirectoryIfPresent();
-
-    const std::filesystem::path fixedConsoleNamPath = resolveProductAssetPath(fixedConsoleNamModelPath());
-    if (std::filesystem::exists(fixedConsoleNamPath))
-    {
-        namAdapter_.bindFixedInternalModelForAllChannels({
-            fixedConsoleNamPath.string(),
-            "fixed hidden Neve/console NAM after selected IR and before tape/fader coloration stages" });
-    }
-
-    const std::filesystem::path fixedTapeNamPath = resolveProductAssetPath(fixedTapeNamModelPath());
-    if (std::filesystem::exists(fixedTapeNamPath))
-    {
-        tapeNamAdapter_.bindFixedInternalModelForAllChannels({
-            fixedTapeNamPath.string(),
-            "fixed hidden Studer C37 tape NAM after console NAM and before fader coloration stages" });
-        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
-            0, { fixedTapeNamPath.string(), "fixed hidden Studer C37 tape NAM again on left mixbus after Model 5" });
-        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
-            1, { fixedTapeNamPath.string(), "fixed hidden Studer C37 tape NAM again on right mixbus after Model 5" });
-    }
-
-    const std::filesystem::path fixedEmtLimiterNamPath = resolveProductAssetPath(fixedEmtLimiterNamModelPath());
-    if (std::filesystem::exists(fixedEmtLimiterNamPath))
-    {
-        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(
-            0, { fixedEmtLimiterNamPath.string(), "switchable hidden EMT 266X NAM limiter on left master bus" });
-        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(
-            1, { fixedEmtLimiterNamPath.string(), "switchable hidden EMT 266X NAM limiter on right master bus" });
-    }
-
-    const std::filesystem::path fixedFinalHiloNamPath = resolveProductAssetPath(fixedFinalHiloNamModelPath());
-    if (std::filesystem::exists(fixedFinalHiloNamPath))
-    {
-        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(
-            0, { fixedFinalHiloNamPath.string(), "fixed final Hilo NAM 1 on left output after post-EMT safety limiter" });
-        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(
-            1, { fixedFinalHiloNamPath.string(), "fixed final Hilo NAM 1 on right output after post-EMT safety limiter" });
-    }
 
     reset();
 }

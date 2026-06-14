@@ -40,6 +40,7 @@ public:
 
     int defaultPreampIndex() const { return kDefaultPreampIndex; }
     const std::array<IrSlot, 11>& preampIrSlots() const { return preampIrSlots_; }
+    void setPreampIrSlots(std::array<IrSlot, 11> slots);
 
     void processChannel(std::size_t channelIndex, int preampIndex, float* samples, std::size_t numFrames);
 

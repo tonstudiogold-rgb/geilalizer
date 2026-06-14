@@ -100,6 +100,13 @@ bool HiddenPostFaderIrAdapter::hasAllFaderThirdIrs() const
     return std::all_of(slots_.begin(), slots_.end(), [](const IrSlot& slot) { return !slot.monoTaps.empty(); });
 }
 
+void HiddenPostFaderIrAdapter::setSlots(std::array<IrSlot, kSlotCount> slots)
+{
+    slots_ = std::move(slots);
+    for (auto& convolver : convolvers_)
+        convolver.reset();
+}
+
 int HiddenPostFaderIrAdapter::slotIndexForFaderPosition(float normalizedFaderPosition) const
 {
     const float p = std::clamp(normalizedFaderPosition, 0.0f, 1.0f);
