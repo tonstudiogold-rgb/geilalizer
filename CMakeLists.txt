@@ -209,6 +209,9 @@ add_executable(RealtimePlaybackStress
 add_executable(MachinePrepareAssetPolicy
     tests/MachinePrepareAssetPolicy.cpp)
 
+add_executable(LimiterBypassClickPolicy
+    tests/LimiterBypassClickPolicy.cpp)
+
 if(GEILALIZER_BUILD_JUCE_APP)
     add_executable(OfflineRenderSlice
         tests/OfflineRenderSlice.cpp
@@ -239,6 +242,7 @@ target_compile_features(RealtimeCallbackSourceAudit PRIVATE cxx_std_20)
 target_include_directories(RealtimePlaybackStress PRIVATE src)
 target_compile_features(RealtimePlaybackStress PRIVATE cxx_std_20)
 target_compile_features(MachinePrepareAssetPolicy PRIVATE cxx_std_20)
+target_compile_features(LimiterBypassClickPolicy PRIVATE cxx_std_20)
 if(GEILALIZER_BUILD_JUCE_APP)
     target_include_directories(OfflineRenderSlice PRIVATE src)
     target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
@@ -296,6 +300,7 @@ add_test(NAME RepositoryPolicySmoke COMMAND RepositoryPolicySmoke)
 add_test(NAME RealtimeCallbackSourceAudit COMMAND RealtimeCallbackSourceAudit)
 add_test(NAME RealtimePlaybackStress COMMAND RealtimePlaybackStress)
 add_test(NAME MachinePrepareAssetPolicy COMMAND MachinePrepareAssetPolicy)
+add_test(NAME LimiterBypassClickPolicy COMMAND LimiterBypassClickPolicy)
 if(GEILALIZER_BUILD_JUCE_APP)
     add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
 endif()
@@ -310,6 +315,8 @@ set_tests_properties(RealtimePlaybackStress PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
 set_tests_properties(MachinePrepareAssetPolicy PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(LimiterBypassClickPolicy PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 if(GEILALIZER_BUILD_JUCE_APP)
     set_tests_properties(OfflineRenderSlice PROPERTIES

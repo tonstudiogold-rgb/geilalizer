@@ -166,6 +166,9 @@ void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
         scratch.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
     masterLeftScratch_.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
     masterRightScratch_.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
+    emtLimiterDryScratch_.assign(static_cast<std::size_t>(maxBlockSize_) * 2, 0.0f);
+    emtLimiterWetScratch_.assign(static_cast<std::size_t>(maxBlockSize_) * 2, 0.0f);
+    emtLimiterBypassCrossfadeSamples_ = std::clamp(static_cast<int>(std::round(sampleRate_ * 0.003)), 64, 256);
     namAdapter_.prepare(sampleRate_, maxBlockSize_);
     tapeNamAdapter_.prepare(sampleRate_, maxBlockSize_);
     masterTapeNamAdapter_.prepare(sampleRate_, maxBlockSize_);
@@ -191,6 +194,9 @@ void MachineProcessor::reset()
     mixbusIrAdapter_.reset();
     mixbusPreIrLimiter_.reset();
     postEmtSafetyLimiter_.reset();
+    emtLimiterBypassSamplesRemaining_ = 0;
+    emtLimiterBypassCurrentEnabled_ = false;
+    emtLimiterBypassTargetEnabled_ = false;
     lastMeters_ = {};
     clearStageProbes();
 }
@@ -256,6 +262,56 @@ void MachineProcessor::processStereoNam(HiddenNamAdapter& adapter, std::vector<f
         interleavedStereo[frame * 2] = masterLeftScratch_[frame];
         interleavedStereo[frame * 2 + 1] = masterRightScratch_[frame];
     }
+}
+
+void MachineProcessor::processEmtLimiterBypass(bool enabled, std::vector<float>& interleavedStereo, std::size_t numFrames)
+{
+    const std::size_t sampleCount = numFrames * 2;
+    if (interleavedStereo.size() < sampleCount)
+        return;
+
+    if (emtLimiterDryScratch_.size() < sampleCount || emtLimiterWetScratch_.size() < sampleCount)
+        return;
+
+    if (enabled != emtLimiterBypassTargetEnabled_)
+    {
+        emtLimiterBypassTargetEnabled_ = enabled;
+        emtLimiterBypassSamplesRemaining_ = emtLimiterBypassCrossfadeSamples_;
+        emtLimiterNamAdapter_.reset();
+    }
+
+    if (emtLimiterBypassSamplesRemaining_ <= 0)
+    {
+        emtLimiterBypassCurrentEnabled_ = emtLimiterBypassTargetEnabled_;
+        if (emtLimiterBypassCurrentEnabled_)
+            processStereoNam(emtLimiterNamAdapter_, interleavedStereo, numFrames);
+        return;
+    }
+
+    std::copy(interleavedStereo.begin(), interleavedStereo.begin() + static_cast<std::ptrdiff_t>(sampleCount),
+              emtLimiterDryScratch_.begin());
+    std::copy(emtLimiterDryScratch_.begin(), emtLimiterDryScratch_.begin() + static_cast<std::ptrdiff_t>(sampleCount),
+              emtLimiterWetScratch_.begin());
+    processStereoNam(emtLimiterNamAdapter_, emtLimiterWetScratch_, numFrames);
+
+    for (std::size_t frame = 0; frame < numFrames; ++frame)
+    {
+        const int remainingBeforeFrame = emtLimiterBypassSamplesRemaining_;
+        const float fadeProgress = 1.0f - (static_cast<float>(remainingBeforeFrame)
+            / static_cast<float>(std::max(1, emtLimiterBypassCrossfadeSamples_)));
+        const float wetAmount = emtLimiterBypassTargetEnabled_ ? fadeProgress : 1.0f - fadeProgress;
+        const float dryAmount = 1.0f - wetAmount;
+
+        const std::size_t left = frame * 2;
+        interleavedStereo[left] = emtLimiterDryScratch_[left] * dryAmount + emtLimiterWetScratch_[left] * wetAmount;
+        interleavedStereo[left + 1] = emtLimiterDryScratch_[left + 1] * dryAmount + emtLimiterWetScratch_[left + 1] * wetAmount;
+
+        if (emtLimiterBypassSamplesRemaining_ > 0)
+            --emtLimiterBypassSamplesRemaining_;
+    }
+
+    if (emtLimiterBypassSamplesRemaining_ <= 0)
+        emtLimiterBypassCurrentEnabled_ = emtLimiterBypassTargetEnabled_;
 }
 
 void MachineProcessor::process(const core::SessionState& session, AudioBlockView block)
@@ -380,8 +436,7 @@ void MachineProcessor::process(const core::SessionState& session, AudioBlockView
     // Safety limiters are fixed protection stages and stay on.
     if (stageProbeEnabled_)
         stageProbeScratch_.assign(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(block.numFrames * 2));
-    if (session.master.limiterEnabled)
-        processStereoNam(emtLimiterNamAdapter_, out, block.numFrames);
+    processEmtLimiterBypass(session.master.limiterEnabled, out, block.numFrames);
     recordStereoStageProbe("EMT limiter NAM", stageProbeScratch_, out, block.numFrames);
 
     if (stageProbeEnabled_)
