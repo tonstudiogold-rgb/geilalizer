@@ -197,6 +197,15 @@ add_executable(RepositoryPolicySmoke
 add_executable(RealtimeCallbackSourceAudit
     tests/RealtimeCallbackSourceAudit.cpp)
 
+add_executable(RealtimePlaybackStress
+    tests/RealtimePlaybackStress.cpp
+    src/core/AudioEngine.cpp
+    src/dsp/HiddenIrAdapter.cpp
+    src/dsp/HiddenMixbusIrAdapter.cpp
+    src/dsp/HiddenNamAdapter.cpp
+    src/dsp/HiddenPostFaderIrAdapter.cpp
+    src/dsp/MachineProcessor.cpp)
+
 if(GEILALIZER_BUILD_JUCE_APP)
     add_executable(OfflineRenderSlice
         tests/OfflineRenderSlice.cpp
@@ -224,6 +233,8 @@ target_include_directories(TapeMachineBehavior PRIVATE src)
 target_compile_features(TapeMachineBehavior PRIVATE cxx_std_20)
 target_compile_features(RepositoryPolicySmoke PRIVATE cxx_std_20)
 target_compile_features(RealtimeCallbackSourceAudit PRIVATE cxx_std_20)
+target_include_directories(RealtimePlaybackStress PRIVATE src)
+target_compile_features(RealtimePlaybackStress PRIVATE cxx_std_20)
 if(GEILALIZER_BUILD_JUCE_APP)
     target_include_directories(OfflineRenderSlice PRIVATE src)
     target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
@@ -255,6 +266,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_link_libraries(FunctionalSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(SignalChainProbeSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(SignalIrAudit PRIVATE ${GEILALIZER_NAMCORE_LINK})
+    target_link_libraries(RealtimePlaybackStress PRIVATE ${GEILALIZER_NAMCORE_LINK})
     if(GEILALIZER_BUILD_JUCE_APP)
         target_link_libraries(OfflineRenderSlice PRIVATE ${GEILALIZER_NAMCORE_LINK})
         target_compile_definitions(OfflineRenderSlice PRIVATE GEILALIZER_USE_NAMCORE)
@@ -265,6 +277,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_compile_definitions(FunctionalSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(SignalChainProbeSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(SignalIrAudit PRIVATE GEILALIZER_USE_NAMCORE)
+    target_compile_definitions(RealtimePlaybackStress PRIVATE GEILALIZER_USE_NAMCORE)
 endif()
 
 enable_testing()
@@ -277,6 +290,7 @@ add_test(NAME SignalIrAudit COMMAND SignalIrAudit)
 add_test(NAME TapeMachineBehavior COMMAND TapeMachineBehavior)
 add_test(NAME RepositoryPolicySmoke COMMAND RepositoryPolicySmoke)
 add_test(NAME RealtimeCallbackSourceAudit COMMAND RealtimeCallbackSourceAudit)
+add_test(NAME RealtimePlaybackStress COMMAND RealtimePlaybackStress)
 if(GEILALIZER_BUILD_JUCE_APP)
     add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
 endif()
@@ -285,6 +299,9 @@ set_tests_properties(RepositoryPolicySmoke PROPERTIES
 set_tests_properties(RealtimeCallbackSourceAudit PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke SignalChainProbeSmoke SignalIrAudit PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
+set_tests_properties(RealtimePlaybackStress PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
 if(GEILALIZER_BUILD_JUCE_APP)
