@@ -192,6 +192,9 @@ add_executable(TapeMachineBehavior
 add_executable(RepositoryPolicySmoke
     tests/RepositoryPolicySmoke.cpp)
 
+add_executable(RealtimeCallbackSourceAudit
+    tests/RealtimeCallbackSourceAudit.cpp)
+
 if(GEILALIZER_BUILD_JUCE_APP)
     add_executable(OfflineRenderSlice
         tests/OfflineRenderSlice.cpp
@@ -218,6 +221,7 @@ target_compile_features(SignalIrAudit PRIVATE cxx_std_20)
 target_include_directories(TapeMachineBehavior PRIVATE src)
 target_compile_features(TapeMachineBehavior PRIVATE cxx_std_20)
 target_compile_features(RepositoryPolicySmoke PRIVATE cxx_std_20)
+target_compile_features(RealtimeCallbackSourceAudit PRIVATE cxx_std_20)
 if(GEILALIZER_BUILD_JUCE_APP)
     target_include_directories(OfflineRenderSlice PRIVATE src)
     target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
@@ -270,10 +274,13 @@ add_test(NAME SignalChainProbeSmoke COMMAND SignalChainProbeSmoke)
 add_test(NAME SignalIrAudit COMMAND SignalIrAudit)
 add_test(NAME TapeMachineBehavior COMMAND TapeMachineBehavior)
 add_test(NAME RepositoryPolicySmoke COMMAND RepositoryPolicySmoke)
+add_test(NAME RealtimeCallbackSourceAudit COMMAND RealtimeCallbackSourceAudit)
 if(GEILALIZER_BUILD_JUCE_APP)
     add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
 endif()
 set_tests_properties(RepositoryPolicySmoke PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(RealtimeCallbackSourceAudit PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke SignalChainProbeSmoke SignalIrAudit PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

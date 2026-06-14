@@ -233,6 +233,7 @@ public:
                 state.inputChannelIndex = selected;
                 if (! state.inputAssigned)
                     state.armed = false;
+                owner.syncRealtimeStateFromSessionLocked();
             }
             owner.applyTapeSnapshot(snap);
             owner.refreshChannelVisuals();
@@ -251,6 +252,7 @@ public:
                 const std::lock_guard<std::mutex> lock(owner.trackMutex);
                 snap = owner.tapeMachine.toggleArm(index - 1);
                 owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).armed = snap.tracks[static_cast<std::size_t>(index - 1)].armed;
+                owner.syncRealtimeStateFromSessionLocked();
             }
             owner.applyTapeSnapshot(snap);
             owner.refreshChannelVisuals();
@@ -266,6 +268,7 @@ public:
         {
             const std::lock_guard<std::mutex> lock(owner.trackMutex);
             owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setInputGainDb(static_cast<float>(inputGain.getValue()));
+            owner.syncRealtimeStateFromSessionLocked();
         };
         addAndMakeVisible(inputGain);
 
@@ -277,6 +280,7 @@ public:
         {
             const std::lock_guard<std::mutex> lock(owner.trackMutex);
             owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setFaderGainDb(static_cast<float>(fader.getValue()));
+            owner.syncRealtimeStateFromSessionLocked();
         };
         addAndMakeVisible(fader);
 
@@ -290,6 +294,7 @@ public:
             if (std::abs(pan.getValue()) > 0.0001)
                 pan.setValue(0.0, juce::dontSendNotification);
             owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1)).setPan(0.0f);
+            owner.syncRealtimeStateFromSessionLocked();
         };
         addAndMakeVisible(pan);
 
@@ -305,6 +310,7 @@ public:
                 snap = owner.tapeMachine.toggleMute(index - 1);
                 auto& state = owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1));
                 state.muted = snap.tracks[static_cast<std::size_t>(index - 1)].muted;
+                owner.syncRealtimeStateFromSessionLocked();
             }
             owner.applyTapeSnapshot(snap);
             owner.refreshChannelVisuals();
@@ -323,6 +329,7 @@ public:
                 snap = owner.tapeMachine.toggleSolo(index - 1);
                 auto& state = owner.audioEngine.session().channel(static_cast<std::size_t>(index - 1));
                 state.solo = snap.tracks[static_cast<std::size_t>(index - 1)].solo;
+                owner.syncRealtimeStateFromSessionLocked();
             }
             owner.applyTapeSnapshot(snap);
             owner.refreshChannelVisuals();
@@ -508,6 +515,9 @@ MainComponent::MainComponent()
     setSize(kContentWidth, kContentHeight);
     formatManager.registerBasicFormats();
     audioBlockInputs.resize(channelCount);
+    for (std::size_t ch = 0; ch < realtimeTrackBuffers.size(); ++ch)
+        syncRealtimeTrackBuffer(ch);
+    syncRealtimeStateFromSessionLocked();
 
     titleLabel.setText("24-TRACK STANDALONE GEILALIZER - TAPE MACHINE", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
@@ -583,6 +593,7 @@ MainComponent::MainComponent()
     {
         const std::lock_guard<std::mutex> lock(trackMutex);
         audioEngine.session().master.limiterEnabled = limiterToggle.getToggleState();
+        syncRealtimeStateFromSessionLocked();
     };
     addAndMakeVisible(limiterToggle);
 
@@ -600,6 +611,7 @@ MainComponent::MainComponent()
     {
         const std::lock_guard<std::mutex> lock(trackMutex);
         audioEngine.session().master.outputTrimDb = static_cast<float>(outputTrim.getValue());
+        syncRealtimeStateFromSessionLocked();
     };
     addAndMakeVisible(outputTrim);
 
@@ -686,13 +698,73 @@ MainComponent::~MainComponent()
     shutdownAudio();
 }
 
+void MainComponent::syncRealtimeStateFromSessionLocked()
+{
+    const auto& session = audioEngine.session();
+    for (std::size_t i = 0; i < realtimeChannels.size(); ++i)
+    {
+        const auto& src = session.channel(i);
+        auto& dst = realtimeChannels[i];
+        dst.inputGainDb.store(src.inputGainDb, std::memory_order_release);
+        dst.faderGainDb.store(src.faderGainDb, std::memory_order_release);
+        dst.pan.store(src.pan, std::memory_order_release);
+        dst.muted.store(src.muted, std::memory_order_release);
+        dst.solo.store(src.solo, std::memory_order_release);
+        dst.armed.store(src.armed, std::memory_order_release);
+        dst.inputAssigned.store(src.inputAssigned, std::memory_order_release);
+        dst.inputChannelIndex.store(src.inputChannelIndex, std::memory_order_release);
+        dst.hasAudioFile.store(src.hasAudioFile, std::memory_order_release);
+        dst.lengthFrames.store(src.lengthFrames, std::memory_order_release);
+    }
+    realtimeMaster.limiterEnabled.store(session.master.limiterEnabled, std::memory_order_release);
+    realtimeMaster.outputTrimDb.store(session.master.outputTrimDb, std::memory_order_release);
+}
+
+void MainComponent::syncRealtimeTrackBuffer(std::size_t channelIndex)
+{
+    if (channelIndex >= trackBuffers.size())
+        return;
+    std::atomic_store_explicit(&realtimeTrackBuffers[channelIndex],
+                               std::make_shared<std::vector<float>>(trackBuffers[channelIndex]),
+                               std::memory_order_release);
+}
+
+void MainComponent::preallocateRecordBuffersForArmedTracks(std::int64_t startFrame)
+{
+    constexpr double kRecordPreallocateSeconds = 300.0;
+    const auto baseFrame = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame));
+    const auto reserveFrames = baseFrame + static_cast<std::size_t>(std::max(1.0, deviceSampleRate) * kRecordPreallocateSeconds);
+    for (std::size_t i = 0; i < trackBuffers.size(); ++i)
+    {
+        const auto& state = audioEngine.session().channel(i);
+        if (! state.armed || ! state.inputAssigned)
+            continue;
+        if (trackBuffers[i].size() < reserveFrames)
+            trackBuffers[i].resize(reserveFrames, 0.0f);
+        auto& mutableState = audioEngine.session().channel(i);
+        mutableState.setLoadedAudioFile("live-input-" + std::to_string(mutableState.inputChannelIndex + 1),
+                                        mutableState.inputChannelIndex,
+                                        trackBuffers[i].size());
+        syncRealtimeTrackBuffer(i);
+    }
+    syncRealtimeStateFromSessionLocked();
+}
+
 void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
 {
     const std::lock_guard<std::mutex> lock(trackMutex);
     deviceSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     deviceBlockSize = samplesPerBlockExpected > 0 ? samplesPerBlockExpected : 512;
     audioEngine.prepare(deviceSampleRate, deviceBlockSize);
-    audioBlockInterleaved.assign(static_cast<std::size_t>(deviceBlockSize) * 2, 0.0f);
+    audioBlockInputs.resize(channelCount);
+    for (auto& channel : audioBlockInputs)
+        channel.resize(static_cast<std::size_t>(deviceBlockSize), 0.0f);
+    for (auto& channel : audioInputScratch)
+        channel.resize(static_cast<std::size_t>(deviceBlockSize), 0.0f);
+    audioBlockInterleaved.resize(static_cast<std::size_t>(deviceBlockSize) * 2, 0.0f);
+    syncRealtimeStateFromSessionLocked();
+    for (std::size_t ch = 0; ch < realtimeTrackBuffers.size(); ++ch)
+        syncRealtimeTrackBuffer(ch);
 }
 
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
@@ -701,65 +773,83 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         return;
 
     const int numSamples = info.numSamples;
-    std::vector<std::vector<float>> liveInputs(channelCount, std::vector<float>(static_cast<std::size_t>(numSamples), 0.0f));
+    if (numSamples <= 0
+        || static_cast<std::size_t>(numSamples) > audioBlockInterleaved.size() / 2
+        || audioBlockInputs.size() != channelCount)
+    {
+        info.clearActiveBufferRegion();
+        return;
+    }
+
     const int availableInputChannels = std::min(channelCount, info.buffer->getNumChannels());
+    for (auto& channel : audioInputScratch)
+        std::fill_n(channel.begin(), static_cast<std::size_t>(numSamples), 0.0f);
     for (int ch = 0; ch < availableInputChannels; ++ch)
         for (int i = 0; i < numSamples; ++i)
-            liveInputs[static_cast<std::size_t>(ch)][static_cast<std::size_t>(i)] = info.buffer->getSample(ch, info.startSample + i);
+            audioInputScratch[static_cast<std::size_t>(ch)][static_cast<std::size_t>(i)] = info.buffer->getSample(ch, info.startSample + i);
 
     info.clearActiveBufferRegion();
     if (! playing.load())
         return;
 
     const auto startFrame = playheadFrame.load();
+    bool anySolo = false;
+    for (const auto& state : realtimeChannels)
+        anySolo = anySolo || state.solo.load(std::memory_order_acquire);
 
+    for (std::size_t ch = 0; ch < realtimeChannels.size(); ++ch)
     {
-        const std::lock_guard<std::mutex> lock(trackMutex);
-        if (audioBlockInputs.size() != channelCount)
-            audioBlockInputs.resize(channelCount);
-        for (auto& channel : audioBlockInputs)
-            channel.assign(static_cast<std::size_t>(numSamples), 0.0f);
+        const auto& state = realtimeChannels[ch];
+        auto& dstState = realtimeSession.channel(ch);
+        dstState.inputGainDb = state.inputGainDb.load(std::memory_order_acquire);
+        dstState.faderGainDb = state.faderGainDb.load(std::memory_order_acquire);
+        dstState.pan = state.pan.load(std::memory_order_acquire);
+        dstState.muted = state.muted.load(std::memory_order_acquire);
+        dstState.solo = state.solo.load(std::memory_order_acquire);
+        dstState.armed = state.armed.load(std::memory_order_acquire);
+        dstState.inputAssigned = state.inputAssigned.load(std::memory_order_acquire);
+        dstState.inputChannelIndex = state.inputChannelIndex.load(std::memory_order_acquire);
+        dstState.hasAudioFile = state.hasAudioFile.load(std::memory_order_acquire);
+        dstState.lengthFrames = state.lengthFrames.load(std::memory_order_acquire);
 
-        for (std::size_t ch = 0; ch < trackBuffers.size(); ++ch)
+        auto& inputs = audioBlockInputs[ch];
+        std::fill_n(inputs.begin(), static_cast<std::size_t>(numSamples), 0.0f);
+
+        const bool shouldRecord = recording.load(std::memory_order_acquire)
+            && dstState.armed && dstState.inputAssigned;
+        const int inputIndex = dstState.inputChannelIndex;
+        const auto source = std::atomic_load_explicit(&realtimeTrackBuffers[ch], std::memory_order_acquire);
+        if (shouldRecord && inputIndex >= 0 && inputIndex < availableInputChannels && source != nullptr)
         {
-            auto& state = audioEngine.session().channel(ch);
-            const bool shouldRecord = recording.load() && state.armed && state.inputAssigned;
-            const int inputIndex = state.inputChannelIndex;
-            if (shouldRecord && inputIndex >= 0 && inputIndex < availableInputChannels)
+            const auto writeEnd = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + numSamples));
+            if (source->size() >= writeEnd)
             {
-                auto& dest = trackBuffers[ch];
-                const auto writeEnd = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + numSamples));
-                if (dest.size() < writeEnd)
-                    dest.resize(writeEnd, 0.0f);
                 for (int i = 0; i < numSamples; ++i)
                 {
                     const auto frame = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + i));
-                    const auto sample = liveInputs[static_cast<std::size_t>(inputIndex)][static_cast<std::size_t>(i)];
-                    dest[frame] = sample;
-                    audioBlockInputs[ch][static_cast<std::size_t>(i)] = sample;
+                    const auto sample = audioInputScratch[static_cast<std::size_t>(inputIndex)][static_cast<std::size_t>(i)];
+                    (*source)[frame] = sample;
+                    inputs[static_cast<std::size_t>(i)] = sample;
                 }
-                state.setLoadedAudioFile("live-input-" + std::to_string(inputIndex + 1), inputIndex, dest.size());
-                state.inputAssigned = true;
-                state.armed = true;
                 continue;
             }
-
-            if (! tapeMachine.shouldMonitorTrack(static_cast<int>(ch)))
-                continue;
-            const auto& src = trackBuffers[ch];
-            if (src.empty())
-                continue;
-            for (int i = 0; i < numSamples; ++i)
-            {
-                const auto frame = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + i));
-                if (frame < src.size())
-                    audioBlockInputs[ch][static_cast<std::size_t>(i)] = src[frame];
-            }
+            recordingBufferOverrun.store(true, std::memory_order_release);
         }
 
-        audioBlockInterleaved.assign(static_cast<std::size_t>(numSamples) * 2, 0.0f);
-        audioEngine.processRealtime(audioBlockInputs, static_cast<std::size_t>(numSamples), audioBlockInterleaved);
+        if ((anySolo && ! dstState.solo) || (! anySolo && dstState.muted) || source == nullptr)
+            continue;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto frame = static_cast<std::size_t>(std::max<std::int64_t>(0, startFrame + i));
+            if (frame < source->size())
+                inputs[static_cast<std::size_t>(i)] = (*source)[frame];
+        }
     }
+
+    realtimeSession.master.limiterEnabled = realtimeMaster.limiterEnabled.load(std::memory_order_acquire);
+    realtimeSession.master.outputTrimDb = realtimeMaster.outputTrimDb.load(std::memory_order_acquire);
+    std::fill_n(audioBlockInterleaved.begin(), static_cast<std::size_t>(numSamples) * 2, 0.0f);
+    audioEngine.processRealtime(realtimeSession, audioBlockInputs, static_cast<std::size_t>(numSamples), audioBlockInterleaved, realtimeMeters);
 
     const int channelsToWrite = std::min(2, info.buffer->getNumChannels());
     for (int sample = 0; sample < numSamples; ++sample)
@@ -770,12 +860,12 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         if (channelsToWrite > 1) info.buffer->setSample(1, info.startSample + sample, right);
     }
 
-    geilalizer::core::TapeMachineSnapshot snap;
-    {
-        const std::lock_guard<std::mutex> lock(trackMutex);
-        snap = tapeMachine.advance(numSamples);
-    }
-    playheadFrame.store(snap.playheadFrame);
+    for (std::size_t ch = 0; ch < realtimeChannels.size(); ++ch)
+        realtimeChannels[ch].meterPeak.store(realtimeMeters.channelPeaks[ch], std::memory_order_release);
+    realtimeMaster.meterLeftPeak.store(realtimeMeters.masterLeftPeak, std::memory_order_release);
+    realtimeMaster.meterRightPeak.store(realtimeMeters.masterRightPeak, std::memory_order_release);
+    realtimeMaster.limiterActive.store(realtimeMeters.limiterActive, std::memory_order_release);
+    playheadFrame.store(startFrame + numSamples, std::memory_order_release);
 }
 
 void MainComponent::releaseResources()
@@ -886,7 +976,9 @@ bool MainComponent::importFileToChannel(const juce::File& file, std::size_t firs
             state.inputAssigned = false;
             state.inputChannelIndex = -1;
             state.armed = false;
+            syncRealtimeTrackBuffer(firstChannelIndex + static_cast<std::size_t>(ch));
         }
+        syncRealtimeStateFromSessionLocked();
     }
 
     projectName = file.getFileNameWithoutExtension();
@@ -917,6 +1009,8 @@ void MainComponent::clearChannel(std::size_t channelIndex)
         auto& state = audioEngine.session().channel(channelIndex);
         state.clearLoadedAudioFile();
         state.armed = false;
+        syncRealtimeTrackBuffer(channelIndex);
+        syncRealtimeStateFromSessionLocked();
     }
 
     setStatus("Track " + juce::String(static_cast<int>(channelIndex + 1)) + " cleared.");
@@ -930,7 +1024,10 @@ void MainComponent::play()
     geilalizer::core::TapeMachineSnapshot snap;
     {
         const std::lock_guard<std::mutex> lock(trackMutex);
+        tapeMachine.setPlayheadFrame(playheadFrame.load(std::memory_order_acquire));
         snap = tapeMachine.play(loadedFrames);
+        if (snap.transport == geilalizer::core::TransportState::Recording)
+            preallocateRecordBuffersForArmedTracks(snap.recordStartFrame);
     }
     applyTapeSnapshot(snap);
 }
@@ -940,7 +1037,18 @@ void MainComponent::stop()
     geilalizer::core::TapeMachineSnapshot snap;
     {
         const std::lock_guard<std::mutex> lock(trackMutex);
+        tapeMachine.setPlayheadFrame(playheadFrame.load(std::memory_order_acquire));
         snap = tapeMachine.stop();
+        for (std::size_t i = 0; i < trackBuffers.size(); ++i)
+        {
+            const auto recorded = std::atomic_load_explicit(&realtimeTrackBuffers[i], std::memory_order_acquire);
+            if (recorded != nullptr)
+            {
+                trackBuffers[i] = *recorded;
+                audioEngine.session().channel(i).lengthFrames = trackBuffers[i].size();
+            }
+        }
+        syncRealtimeStateFromSessionLocked();
     }
     if (snap.lastRecording.has_value())
         pendingUndoSpan = snap.lastRecording;
@@ -954,9 +1062,11 @@ void MainComponent::rewind()
     playheadFrame.store(0);
     {
         const std::lock_guard<std::mutex> lock(trackMutex);
+        tapeMachine.setPlayheadFrame(playheadFrame.load(std::memory_order_acquire));
         audioEngine.reset();
         tapeMachine.stop();
         tapeMachine.stop();
+        syncRealtimeStateFromSessionLocked();
     }
     setStatus(juce::String::fromUTF8("REW - Position auf Start zur\303\274ckgesetzt."));
 }
@@ -968,7 +1078,12 @@ void MainComponent::toggleRecord()
         const std::lock_guard<std::mutex> lock(trackMutex);
         if (! recording.load())
             undoTrackBuffers = trackBuffers;
+        tapeMachine.setPlayheadFrame(playheadFrame.load(std::memory_order_acquire));
         snap = tapeMachine.toggleRecord();
+        if (snap.transport == geilalizer::core::TransportState::Recording)
+            preallocateRecordBuffersForArmedTracks(snap.recordStartFrame);
+        else
+            syncRealtimeStateFromSessionLocked();
     }
     if (snap.lastRecording.has_value())
         pendingUndoSpan = snap.lastRecording;
@@ -982,7 +1097,11 @@ void MainComponent::undoLastRecording()
         const std::lock_guard<std::mutex> lock(trackMutex);
         trackBuffers = undoTrackBuffers;
         for (int i = 0; i < channelCount; ++i)
+        {
             audioEngine.session().channel(static_cast<std::size_t>(i)).lengthFrames = trackBuffers[static_cast<std::size_t>(i)].size();
+            syncRealtimeTrackBuffer(static_cast<std::size_t>(i));
+        }
+        syncRealtimeStateFromSessionLocked();
     }
     geilalizer::core::TapeMachineSnapshot snap;
     {
@@ -1194,31 +1313,35 @@ void MainComponent::timerCallback()
 
 void MainComponent::refreshChannelVisuals()
 {
-    const std::lock_guard<std::mutex> lock(trackMutex);
     for (int i = 0; i < channels.size(); ++i)
     {
-        auto& state = audioEngine.session().channel(static_cast<std::size_t>(i));
-        channels[i]->setLoaded(state.hasAudioFile);
-        channels[i]->setArmState(state.armed);
-        channels[i]->setInputGainValue(state.inputGainDb);
-        channels[i]->setFaderValue(state.faderGainDb);
-        channels[i]->setPanValue(state.pan);
-        channels[i]->setInputSelection(state.inputAssigned ? state.inputChannelIndex : -1);
-        channels[i]->setMuteSoloState(state.muted, state.solo);
-        channels[i]->setNameText(juce::String(state.name));
-        channels[i]->setMeterPeak(state.meterPeak);
+        const auto index = static_cast<std::size_t>(i);
+        auto& state = realtimeChannels[index];
+        channels[i]->setLoaded(state.hasAudioFile.load(std::memory_order_acquire));
+        channels[i]->setArmState(state.armed.load(std::memory_order_acquire));
+        channels[i]->setInputGainValue(state.inputGainDb.load(std::memory_order_acquire));
+        channels[i]->setFaderValue(state.faderGainDb.load(std::memory_order_acquire));
+        channels[i]->setPanValue(state.pan.load(std::memory_order_acquire));
+        const bool inputAssigned = state.inputAssigned.load(std::memory_order_acquire);
+        channels[i]->setInputSelection(inputAssigned ? state.inputChannelIndex.load(std::memory_order_acquire) : -1);
+        channels[i]->setMuteSoloState(state.muted.load(std::memory_order_acquire),
+                                      state.solo.load(std::memory_order_acquire));
+        {
+            const std::lock_guard<std::mutex> lock(trackMutex);
+            channels[i]->setNameText(juce::String(audioEngine.session().channel(index).name));
+        }
+        channels[i]->setMeterPeak(state.meterPeak.load(std::memory_order_acquire));
     }
 }
 
 void MainComponent::refreshMasterVisuals()
 {
-    const std::lock_guard<std::mutex> lock(trackMutex);
-    const auto& master = audioEngine.session().master;
     if (masterMeter != nullptr)
-        masterMeter->setLevels(master.meterLeftPeak, master.meterRightPeak);
-    limiterToggle.setToggleState(master.limiterEnabled, juce::dontSendNotification);
-    outputTrim.setValue(master.outputTrimDb, juce::dontSendNotification);
-    (void) master.limiterActive;
+        masterMeter->setLevels(realtimeMaster.meterLeftPeak.load(std::memory_order_acquire),
+                               realtimeMaster.meterRightPeak.load(std::memory_order_acquire));
+    limiterToggle.setToggleState(realtimeMaster.limiterEnabled.load(std::memory_order_acquire), juce::dontSendNotification);
+    outputTrim.setValue(realtimeMaster.outputTrimDb.load(std::memory_order_acquire), juce::dontSendNotification);
+    (void) realtimeMaster.limiterActive.load(std::memory_order_acquire);
 }
 
 void MainComponent::setStatus(juce::String message)
