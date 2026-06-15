@@ -46,7 +46,11 @@ int main()
 {
     const auto source = readFile("src/dsp/MachineProcessor.cpp");
     const auto header = readFile("src/dsp/MachineProcessor.h");
+    const auto audioEngineSource = readFile("src/core/AudioEngine.cpp");
+    const auto mainComponentSource = readFile("src/MainComponent.cpp");
     const auto prepare = extractFunctionBody(source, "void MachineProcessor::prepare");
+    const auto prepareToPlay = extractFunctionBody(mainComponentSource, "void MainComponent::prepareToPlay");
+    const auto audioCallback = extractFunctionBody(mainComponentSource, "void MainComponent::getNextAudioBlock");
 
     const std::vector<std::string> forbidden {
         "std::filesystem",
@@ -75,6 +79,29 @@ int main()
     assert(contains(header, "struct PreparedMachineState"));
     assert(contains(source, "loadDefaultAssetsOffAudioThread"));
     assert(contains(source, "applyPreparedMachineState"));
+    assert(contains(audioEngineSource, "loadDefaultAssetsBeforeAudioStart"));
+    assert(contains(mainComponentSource, "audioEngine.loadDefaultAssetsBeforeAudioStart();"));
+
+    if (contains(prepareToPlay, "loadDefaultAssets") || contains(prepareToPlay, "applyPreparedMachineState"))
+    {
+        std::cerr << "prepareToPlay must not load/apply NAM/IR assets; it runs on device changes.\n";
+        return 1;
+    }
+    if (contains(audioCallback, "loadDefaultAssets") || contains(audioCallback, "applyPreparedMachineState"))
+    {
+        std::cerr << "Audio callback must never load/apply NAM/IR assets.\n";
+        return 1;
+    }
+
+    const auto loadBeforeAudio = mainComponentSource.find("audioEngine.loadDefaultAssetsBeforeAudioStart();");
+    const auto startAudio = mainComponentSource.find("setAudioChannels(channelCount, 2);");
+    assert(loadBeforeAudio != std::string::npos);
+    assert(startAudio != std::string::npos);
+    if (loadBeforeAudio > startAudio)
+    {
+        std::cerr << "Default asset load/apply must happen before setAudioChannels starts audio.\n";
+        return 1;
+    }
 
     std::cout << "MachinePrepareAssetPolicy: PASS\n";
     return 0;

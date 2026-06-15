@@ -35,6 +35,13 @@ int main()
     assert(contains(header, "emtLimiterWetScratch_"));
     assert(contains(source, "processEmtLimiterBypass"));
     assert(contains(source, "emtLimiterBypassCrossfadeSamples_ = std::clamp"));
+    assert(contains(source, "if (emtLimiterBypassTargetEnabled_)\n            emtLimiterNamAdapter_.reset();"));
+    assert(contains(source, "if (! emtLimiterBypassCurrentEnabled_)\n            emtLimiterNamAdapter_.reset();"));
+    if (contains(source, "emtLimiterBypassSamplesRemaining_ = emtLimiterBypassCrossfadeSamples_;\n        emtLimiterNamAdapter_.reset();"))
+    {
+        std::cerr << "EMT limiter resets immediately on fade direction changes; fade-out must keep wet state alive.\n";
+        return 1;
+    }
     assert(contains(source, "64"));
     assert(contains(source, "256"));
 

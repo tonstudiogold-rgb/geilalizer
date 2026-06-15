@@ -14,6 +14,7 @@ class AudioEngine
 public:
     void prepare(double sampleRate, int maxBlockSize);
     void reset();
+    void loadDefaultAssetsBeforeAudioStart();
 
     SessionState& session() { return session_; }
     const SessionState& session() const { return session_; }

@@ -277,7 +277,8 @@ void MachineProcessor::processEmtLimiterBypass(bool enabled, std::vector<float>&
     {
         emtLimiterBypassTargetEnabled_ = enabled;
         emtLimiterBypassSamplesRemaining_ = emtLimiterBypassCrossfadeSamples_;
-        emtLimiterNamAdapter_.reset();
+        if (emtLimiterBypassTargetEnabled_)
+            emtLimiterNamAdapter_.reset();
     }
 
     if (emtLimiterBypassSamplesRemaining_ <= 0)
@@ -311,7 +312,11 @@ void MachineProcessor::processEmtLimiterBypass(bool enabled, std::vector<float>&
     }
 
     if (emtLimiterBypassSamplesRemaining_ <= 0)
+    {
         emtLimiterBypassCurrentEnabled_ = emtLimiterBypassTargetEnabled_;
+        if (! emtLimiterBypassCurrentEnabled_)
+            emtLimiterNamAdapter_.reset();
+    }
 }
 
 void MachineProcessor::process(const core::SessionState& session, AudioBlockView block)

@@ -13,6 +13,11 @@ void AudioEngine::reset()
     processor_.reset();
 }
 
+void AudioEngine::loadDefaultAssetsBeforeAudioStart()
+{
+    processor_.applyPreparedMachineState(dsp::MachineProcessor::loadDefaultAssetsOffAudioThread());
+}
+
 void AudioEngine::processRealtime(const std::vector<std::vector<float>>& monoChannelInputs,
                                   std::size_t numFrames,
                                   std::vector<float>& interleavedStereoOutput)

@@ -518,6 +518,7 @@ MainComponent::MainComponent()
     for (std::size_t ch = 0; ch < realtimeTrackBuffers.size(); ++ch)
         syncRealtimeTrackBuffer(ch);
     syncRealtimeStateFromSessionLocked();
+    audioEngine.loadDefaultAssetsBeforeAudioStart();
 
     titleLabel.setText("24-TRACK STANDALONE GEILALIZER - TAPE MACHINE", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
