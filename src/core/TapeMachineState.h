@@ -158,6 +158,12 @@ public:
         return snapshot();
     }
 
+    TapeMachineSnapshot setPlayheadFrame(std::int64_t frame)
+    {
+        playheadFrame = std::max<std::int64_t>(0, frame);
+        return snapshot();
+    }
+
     TapeMachineSnapshot play(std::int64_t materialFrames)
     {
         knownMaterialFrames = std::max<std::int64_t>(0, materialFrames);

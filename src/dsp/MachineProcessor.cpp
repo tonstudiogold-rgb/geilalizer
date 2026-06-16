@@ -74,6 +74,90 @@ const char* fixedFinalHiloNamModelPath()
 }
 } // namespace
 
+void MachineProcessor::applyPreparedMachineState(PreparedMachineState state)
+{
+    irAdapter_.setPreampIrSlots(std::move(state.preampIrSlots));
+    postFaderIrAdapter_.setSlots(std::move(state.postFaderIrSlots));
+    mixbusIrAdapter_.setSlots(std::move(state.mixbusIrSlots));
+
+    if (state.consoleNamAvailable)
+        namAdapter_.bindFixedInternalModelForAllChannels(state.consoleNam);
+
+    if (state.tapeNamAvailable)
+    {
+        tapeNamAdapter_.bindFixedInternalModelForAllChannels(state.tapeNam);
+        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
+            0, { state.tapeNam.modelIdentifier, "fixed hidden Studer C37 tape NAM again on left mixbus after Model 5" });
+        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
+            1, { state.tapeNam.modelIdentifier, "fixed hidden Studer C37 tape NAM again on right mixbus after Model 5" });
+    }
+
+    if (state.emtLimiterNamAvailable)
+    {
+        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(0, state.emtLimiterNam);
+        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(
+            1, { state.emtLimiterNam.modelIdentifier, "switchable hidden EMT 266X NAM limiter on right master bus" });
+    }
+
+    if (state.finalHiloNamAvailable)
+    {
+        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(0, state.finalHiloNam);
+        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(
+            1, { state.finalHiloNam.modelIdentifier, "fixed final Hilo NAM 1 on right output after post-EMT safety limiter" });
+    }
+}
+
+MachineProcessor::PreparedMachineState MachineProcessor::loadDefaultAssetsOffAudioThread()
+{
+    PreparedMachineState state;
+
+    HiddenIrAdapter preampLoader;
+    preampLoader.loadNeve1073DirectoryIfPresent();
+    state.preampIrSlots = preampLoader.preampIrSlots();
+
+    HiddenPostFaderIrAdapter postFaderLoader;
+    postFaderLoader.loadSsl4000GDirectoryIfPresent();
+    state.postFaderIrSlots = postFaderLoader.slots();
+
+    HiddenMixbusIrAdapter mixbusLoader;
+    mixbusLoader.loadMixbusDirectoryIfPresent();
+    state.mixbusIrSlots = mixbusLoader.slots();
+
+    const std::filesystem::path fixedConsoleNamPath = resolveProductAssetPath(fixedConsoleNamModelPath());
+    if (std::filesystem::exists(fixedConsoleNamPath))
+    {
+        state.consoleNamAvailable = true;
+        state.consoleNam = { fixedConsoleNamPath.string(),
+            "fixed hidden Neve/console NAM after selected IR and before tape/fader coloration stages" };
+    }
+
+    const std::filesystem::path fixedTapeNamPath = resolveProductAssetPath(fixedTapeNamModelPath());
+    if (std::filesystem::exists(fixedTapeNamPath))
+    {
+        state.tapeNamAvailable = true;
+        state.tapeNam = { fixedTapeNamPath.string(),
+            "fixed hidden Studer C37 tape NAM after console NAM and before fader coloration stages" };
+    }
+
+    const std::filesystem::path fixedEmtLimiterNamPath = resolveProductAssetPath(fixedEmtLimiterNamModelPath());
+    if (std::filesystem::exists(fixedEmtLimiterNamPath))
+    {
+        state.emtLimiterNamAvailable = true;
+        state.emtLimiterNam = { fixedEmtLimiterNamPath.string(),
+            "switchable hidden EMT 266X NAM limiter on left master bus" };
+    }
+
+    const std::filesystem::path fixedFinalHiloNamPath = resolveProductAssetPath(fixedFinalHiloNamModelPath());
+    if (std::filesystem::exists(fixedFinalHiloNamPath))
+    {
+        state.finalHiloNamAvailable = true;
+        state.finalHiloNam = { fixedFinalHiloNamPath.string(),
+            "fixed final Hilo NAM 1 on left output after post-EMT safety limiter" };
+    }
+
+    return state;
+}
+
 void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
 {
     sampleRate_ = sampleRate > 0.0 ? sampleRate : 44100.0;
@@ -82,6 +166,9 @@ void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
         scratch.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
     masterLeftScratch_.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
     masterRightScratch_.assign(static_cast<std::size_t>(maxBlockSize_), 0.0f);
+    emtLimiterDryScratch_.assign(static_cast<std::size_t>(maxBlockSize_) * 2, 0.0f);
+    emtLimiterWetScratch_.assign(static_cast<std::size_t>(maxBlockSize_) * 2, 0.0f);
+    emtLimiterBypassCrossfadeSamples_ = std::clamp(static_cast<int>(std::round(sampleRate_ * 0.003)), 64, 256);
     namAdapter_.prepare(sampleRate_, maxBlockSize_);
     tapeNamAdapter_.prepare(sampleRate_, maxBlockSize_);
     masterTapeNamAdapter_.prepare(sampleRate_, maxBlockSize_);
@@ -90,47 +177,6 @@ void MachineProcessor::prepare(double sampleRate, int maxBlockSize)
     irAdapter_.prepare(sampleRate_, maxBlockSize_);
     postFaderIrAdapter_.prepare(sampleRate_, maxBlockSize_);
     mixbusIrAdapter_.prepare(sampleRate_, maxBlockSize_);
-    irAdapter_.loadNeve1073DirectoryIfPresent();
-    postFaderIrAdapter_.loadSsl4000GDirectoryIfPresent();
-    mixbusIrAdapter_.loadMixbusDirectoryIfPresent();
-
-    const std::filesystem::path fixedConsoleNamPath = resolveProductAssetPath(fixedConsoleNamModelPath());
-    if (std::filesystem::exists(fixedConsoleNamPath))
-    {
-        namAdapter_.bindFixedInternalModelForAllChannels({
-            fixedConsoleNamPath.string(),
-            "fixed hidden Neve/console NAM after selected IR and before tape/fader coloration stages" });
-    }
-
-    const std::filesystem::path fixedTapeNamPath = resolveProductAssetPath(fixedTapeNamModelPath());
-    if (std::filesystem::exists(fixedTapeNamPath))
-    {
-        tapeNamAdapter_.bindFixedInternalModelForAllChannels({
-            fixedTapeNamPath.string(),
-            "fixed hidden Studer C37 tape NAM after console NAM and before fader coloration stages" });
-        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
-            0, { fixedTapeNamPath.string(), "fixed hidden Studer C37 tape NAM again on left mixbus after Model 5" });
-        masterTapeNamAdapter_.bindSingleInternalModelForNextIntegration(
-            1, { fixedTapeNamPath.string(), "fixed hidden Studer C37 tape NAM again on right mixbus after Model 5" });
-    }
-
-    const std::filesystem::path fixedEmtLimiterNamPath = resolveProductAssetPath(fixedEmtLimiterNamModelPath());
-    if (std::filesystem::exists(fixedEmtLimiterNamPath))
-    {
-        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(
-            0, { fixedEmtLimiterNamPath.string(), "switchable hidden EMT 266X NAM limiter on left master bus" });
-        emtLimiterNamAdapter_.bindSingleInternalModelForNextIntegration(
-            1, { fixedEmtLimiterNamPath.string(), "switchable hidden EMT 266X NAM limiter on right master bus" });
-    }
-
-    const std::filesystem::path fixedFinalHiloNamPath = resolveProductAssetPath(fixedFinalHiloNamModelPath());
-    if (std::filesystem::exists(fixedFinalHiloNamPath))
-    {
-        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(
-            0, { fixedFinalHiloNamPath.string(), "fixed final Hilo NAM 1 on left output after post-EMT safety limiter" });
-        finalHiloNamAdapter_.bindSingleInternalModelForNextIntegration(
-            1, { fixedFinalHiloNamPath.string(), "fixed final Hilo NAM 1 on right output after post-EMT safety limiter" });
-    }
 
     reset();
 }
@@ -148,6 +194,9 @@ void MachineProcessor::reset()
     mixbusIrAdapter_.reset();
     mixbusPreIrLimiter_.reset();
     postEmtSafetyLimiter_.reset();
+    emtLimiterBypassSamplesRemaining_ = 0;
+    emtLimiterBypassCurrentEnabled_ = false;
+    emtLimiterBypassTargetEnabled_ = false;
     lastMeters_ = {};
     clearStageProbes();
 }
@@ -212,6 +261,61 @@ void MachineProcessor::processStereoNam(HiddenNamAdapter& adapter, std::vector<f
     {
         interleavedStereo[frame * 2] = masterLeftScratch_[frame];
         interleavedStereo[frame * 2 + 1] = masterRightScratch_[frame];
+    }
+}
+
+void MachineProcessor::processEmtLimiterBypass(bool enabled, std::vector<float>& interleavedStereo, std::size_t numFrames)
+{
+    const std::size_t sampleCount = numFrames * 2;
+    if (interleavedStereo.size() < sampleCount)
+        return;
+
+    if (emtLimiterDryScratch_.size() < sampleCount || emtLimiterWetScratch_.size() < sampleCount)
+        return;
+
+    if (enabled != emtLimiterBypassTargetEnabled_)
+    {
+        emtLimiterBypassTargetEnabled_ = enabled;
+        emtLimiterBypassSamplesRemaining_ = emtLimiterBypassCrossfadeSamples_;
+        if (emtLimiterBypassTargetEnabled_)
+            emtLimiterNamAdapter_.reset();
+    }
+
+    if (emtLimiterBypassSamplesRemaining_ <= 0)
+    {
+        emtLimiterBypassCurrentEnabled_ = emtLimiterBypassTargetEnabled_;
+        if (emtLimiterBypassCurrentEnabled_)
+            processStereoNam(emtLimiterNamAdapter_, interleavedStereo, numFrames);
+        return;
+    }
+
+    std::copy(interleavedStereo.begin(), interleavedStereo.begin() + static_cast<std::ptrdiff_t>(sampleCount),
+              emtLimiterDryScratch_.begin());
+    std::copy(emtLimiterDryScratch_.begin(), emtLimiterDryScratch_.begin() + static_cast<std::ptrdiff_t>(sampleCount),
+              emtLimiterWetScratch_.begin());
+    processStereoNam(emtLimiterNamAdapter_, emtLimiterWetScratch_, numFrames);
+
+    for (std::size_t frame = 0; frame < numFrames; ++frame)
+    {
+        const int remainingBeforeFrame = emtLimiterBypassSamplesRemaining_;
+        const float fadeProgress = 1.0f - (static_cast<float>(remainingBeforeFrame)
+            / static_cast<float>(std::max(1, emtLimiterBypassCrossfadeSamples_)));
+        const float wetAmount = emtLimiterBypassTargetEnabled_ ? fadeProgress : 1.0f - fadeProgress;
+        const float dryAmount = 1.0f - wetAmount;
+
+        const std::size_t left = frame * 2;
+        interleavedStereo[left] = emtLimiterDryScratch_[left] * dryAmount + emtLimiterWetScratch_[left] * wetAmount;
+        interleavedStereo[left + 1] = emtLimiterDryScratch_[left + 1] * dryAmount + emtLimiterWetScratch_[left + 1] * wetAmount;
+
+        if (emtLimiterBypassSamplesRemaining_ > 0)
+            --emtLimiterBypassSamplesRemaining_;
+    }
+
+    if (emtLimiterBypassSamplesRemaining_ <= 0)
+    {
+        emtLimiterBypassCurrentEnabled_ = emtLimiterBypassTargetEnabled_;
+        if (! emtLimiterBypassCurrentEnabled_)
+            emtLimiterNamAdapter_.reset();
     }
 }
 
@@ -337,8 +441,7 @@ void MachineProcessor::process(const core::SessionState& session, AudioBlockView
     // Safety limiters are fixed protection stages and stay on.
     if (stageProbeEnabled_)
         stageProbeScratch_.assign(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(block.numFrames * 2));
-    if (session.master.limiterEnabled)
-        processStereoNam(emtLimiterNamAdapter_, out, block.numFrames);
+    processEmtLimiterBypass(session.master.limiterEnabled, out, block.numFrames);
     recordStereoStageProbe("EMT limiter NAM", stageProbeScratch_, out, block.numFrames);
 
     if (stageProbeEnabled_)

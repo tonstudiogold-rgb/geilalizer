@@ -16,6 +16,7 @@ set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 set(JUCE_ENABLE_MODULE_SOURCE_GROUPS ON CACHE BOOL "" FORCE)
 option(GEILALIZER_ENABLE_NAMCORE "Build hidden NAM stages with NeuralAmpModelerCore" ON)
 option(GEILALIZER_BUILD_JUCE_APP "Build the JUCE standalone GUI app" ON)
+option(GEILALIZER_BUNDLE_PRIVATE_MODELS "Copy local private_nam_models into app bundles. OFF for all public/release builds." OFF)
 
 if(GEILALIZER_BUILD_JUCE_APP)
     FetchContent_Declare(
@@ -30,7 +31,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     FetchContent_Declare(
         NeuralAmpModelerCore
         GIT_REPOSITORY https://github.com/sdatkinson/NeuralAmpModelerCore.git
-        GIT_TAG main
+        GIT_TAG e49c93e678549230d09efbb0beeb50511e387874
         GIT_SHALLOW TRUE
         GIT_SUBMODULES_RECURSE TRUE)
     FetchContent_MakeAvailable(NeuralAmpModelerCore)
@@ -121,7 +122,8 @@ target_link_libraries(Geilalizer
             XCODE_ATTRIBUTE_MACOSX_DEPLOYMENT_TARGET "12.0")
     endif()
 
-    if(EXISTS "${CMAKE_SOURCE_DIR}/private_nam_models")
+    if(GEILALIZER_BUNDLE_PRIVATE_MODELS AND EXISTS "${CMAKE_SOURCE_DIR}/private_nam_models")
+        message(WARNING "GEILALIZER_BUNDLE_PRIVATE_MODELS is ON: private_nam_models will be copied into this local app bundle. Never use this for public releases.")
         if(APPLE)
             add_custom_command(TARGET Geilalizer POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -189,6 +191,27 @@ add_executable(SignalIrAudit
 add_executable(TapeMachineBehavior
     tests/TapeMachineBehavior.cpp)
 
+add_executable(RepositoryPolicySmoke
+    tests/RepositoryPolicySmoke.cpp)
+
+add_executable(RealtimeCallbackSourceAudit
+    tests/RealtimeCallbackSourceAudit.cpp)
+
+add_executable(RealtimePlaybackStress
+    tests/RealtimePlaybackStress.cpp
+    src/core/AudioEngine.cpp
+    src/dsp/HiddenIrAdapter.cpp
+    src/dsp/HiddenMixbusIrAdapter.cpp
+    src/dsp/HiddenNamAdapter.cpp
+    src/dsp/HiddenPostFaderIrAdapter.cpp
+    src/dsp/MachineProcessor.cpp)
+
+add_executable(MachinePrepareAssetPolicy
+    tests/MachinePrepareAssetPolicy.cpp)
+
+add_executable(LimiterBypassClickPolicy
+    tests/LimiterBypassClickPolicy.cpp)
+
 if(GEILALIZER_BUILD_JUCE_APP)
     add_executable(OfflineRenderSlice
         tests/OfflineRenderSlice.cpp
@@ -214,6 +237,12 @@ target_include_directories(SignalIrAudit PRIVATE src)
 target_compile_features(SignalIrAudit PRIVATE cxx_std_20)
 target_include_directories(TapeMachineBehavior PRIVATE src)
 target_compile_features(TapeMachineBehavior PRIVATE cxx_std_20)
+target_compile_features(RepositoryPolicySmoke PRIVATE cxx_std_20)
+target_compile_features(RealtimeCallbackSourceAudit PRIVATE cxx_std_20)
+target_include_directories(RealtimePlaybackStress PRIVATE src)
+target_compile_features(RealtimePlaybackStress PRIVATE cxx_std_20)
+target_compile_features(MachinePrepareAssetPolicy PRIVATE cxx_std_20)
+target_compile_features(LimiterBypassClickPolicy PRIVATE cxx_std_20)
 if(GEILALIZER_BUILD_JUCE_APP)
     target_include_directories(OfflineRenderSlice PRIVATE src)
     target_compile_features(OfflineRenderSlice PRIVATE cxx_std_20)
@@ -245,6 +274,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_link_libraries(FunctionalSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(SignalChainProbeSmoke PRIVATE ${GEILALIZER_NAMCORE_LINK})
     target_link_libraries(SignalIrAudit PRIVATE ${GEILALIZER_NAMCORE_LINK})
+    target_link_libraries(RealtimePlaybackStress PRIVATE ${GEILALIZER_NAMCORE_LINK})
     if(GEILALIZER_BUILD_JUCE_APP)
         target_link_libraries(OfflineRenderSlice PRIVATE ${GEILALIZER_NAMCORE_LINK})
         target_compile_definitions(OfflineRenderSlice PRIVATE GEILALIZER_USE_NAMCORE)
@@ -255,6 +285,7 @@ if(GEILALIZER_ENABLE_NAMCORE)
     target_compile_definitions(FunctionalSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(SignalChainProbeSmoke PRIVATE GEILALIZER_USE_NAMCORE)
     target_compile_definitions(SignalIrAudit PRIVATE GEILALIZER_USE_NAMCORE)
+    target_compile_definitions(RealtimePlaybackStress PRIVATE GEILALIZER_USE_NAMCORE)
 endif()
 
 enable_testing()
@@ -265,12 +296,28 @@ add_test(NAME FunctionalSmoke COMMAND FunctionalSmoke)
 add_test(NAME SignalChainProbeSmoke COMMAND SignalChainProbeSmoke)
 add_test(NAME SignalIrAudit COMMAND SignalIrAudit)
 add_test(NAME TapeMachineBehavior COMMAND TapeMachineBehavior)
+add_test(NAME RepositoryPolicySmoke COMMAND RepositoryPolicySmoke)
+add_test(NAME RealtimeCallbackSourceAudit COMMAND RealtimeCallbackSourceAudit)
+add_test(NAME RealtimePlaybackStress COMMAND RealtimePlaybackStress)
+add_test(NAME MachinePrepareAssetPolicy COMMAND MachinePrepareAssetPolicy)
+add_test(NAME LimiterBypassClickPolicy COMMAND LimiterBypassClickPolicy)
 if(GEILALIZER_BUILD_JUCE_APP)
     add_test(NAME OfflineRenderSlice COMMAND OfflineRenderSlice)
 endif()
+set_tests_properties(RepositoryPolicySmoke PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(RealtimeCallbackSourceAudit PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 set_tests_properties(CoreSmoke ProductE2E FunctionalSmoke SignalChainProbeSmoke SignalIrAudit PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
+set_tests_properties(RealtimePlaybackStress PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    ENVIRONMENT "GEILALIZER_DISABLE_REAL_NAMCORE=1")
+set_tests_properties(MachinePrepareAssetPolicy PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+set_tests_properties(LimiterBypassClickPolicy PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 if(GEILALIZER_BUILD_JUCE_APP)
     set_tests_properties(OfflineRenderSlice PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

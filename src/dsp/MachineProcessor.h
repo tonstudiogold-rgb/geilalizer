@@ -43,6 +43,26 @@ public:
         bool changed(float threshold = 1.0e-6f) const { return deltaRms > threshold; }
     };
 
+    struct PreparedMachineState
+    {
+        std::array<HiddenIrAdapter::IrSlot, 11> preampIrSlots;
+        std::array<HiddenPostFaderIrAdapter::IrSlot, HiddenPostFaderIrAdapter::kSlotCount> postFaderIrSlots;
+        std::array<HiddenMixbusIrAdapter::IrSlot, HiddenMixbusIrAdapter::kSlotCount> mixbusIrSlots;
+        HiddenNamAdapter::Request consoleNam;
+        HiddenNamAdapter::Request tapeNam;
+        HiddenNamAdapter::Request emtLimiterNam;
+        HiddenNamAdapter::Request finalHiloNam;
+        bool consoleNamAvailable = false;
+        bool tapeNamAvailable = false;
+        bool emtLimiterNamAvailable = false;
+        bool finalHiloNamAvailable = false;
+    };
+
+    // Asset/model discovery and file loading must happen off the CoreAudio/JUCE prepare path.
+    // Call this from a background/non-realtime context, then apply the result from a safe thread.
+    static PreparedMachineState loadDefaultAssetsOffAudioThread();
+    void applyPreparedMachineState(PreparedMachineState state);
+
     void prepare(double sampleRate, int maxBlockSize);
     void reset();
 
@@ -67,6 +87,7 @@ public:
 
 private:
     void processStereoNam(HiddenNamAdapter& adapter, std::vector<float>& interleavedStereo, std::size_t numFrames);
+    void processEmtLimiterBypass(bool enabled, std::vector<float>& interleavedStereo, std::size_t numFrames);
     void clearStageProbes();
     void recordMonoStageProbe(const std::string& name, const std::vector<float>& before,
                               const float* after, std::size_t frames);
@@ -89,7 +110,13 @@ private:
     std::array<std::vector<float>, core::kMaxMonoChannels> channelScratch_;
     std::vector<float> masterLeftScratch_;
     std::vector<float> masterRightScratch_;
+    std::vector<float> emtLimiterDryScratch_;
+    std::vector<float> emtLimiterWetScratch_;
     std::vector<float> stageProbeScratch_;
+    int emtLimiterBypassCrossfadeSamples_ = 128;
+    int emtLimiterBypassSamplesRemaining_ = 0;
+    bool emtLimiterBypassCurrentEnabled_ = false;
+    bool emtLimiterBypassTargetEnabled_ = false;
     bool stageProbeEnabled_ = false;
     std::vector<StageProbe> lastStageProbes_;
     ProcessMeters lastMeters_;

@@ -50,20 +50,24 @@ int main()
     assert(processor.irAdapter().preampIrSlots()[0].fileName == "Neve 20.wav");
     assert(processor.irAdapter().preampIrSlots()[5].fileName == "Neve 55.wav");
     assert(processor.irAdapter().preampIrSlots()[10].fileName == "Neve 80.wav");
-    assert(processor.irAdapter().hasAnyIr());
-    assert(processor.irAdapter().hasIrForPreampIndex(5));
+    const bool hasPrivateAssets = processor.irAdapter().hasAnyIr();
+    if (hasPrivateAssets)
+        assert(processor.irAdapter().hasIrForPreampIndex(5));
     assert(processor.namAdapter().bindSingleInternalModelForNextIntegration(
         0, { "placeholder-model-1", "smoke test single model bind" }));
     assert(processor.namAdapter().hasModelForChannel(0));
-    assert(processor.tapeNamAdapter().hasAnyModel());
-    assert(processor.tapeNamAdapter().hasModelForChannel(0));
-    assert(processor.masterTapeNamAdapter().hasModelForChannel(0));
-    assert(processor.masterTapeNamAdapter().hasModelForChannel(1));
-    assert(processor.emtLimiterNamAdapter().hasModelForChannel(0));
-    assert(processor.emtLimiterNamAdapter().hasModelForChannel(1));
-    assert(processor.finalHiloNamAdapter().hasModelForChannel(0));
-    assert(processor.finalHiloNamAdapter().hasModelForChannel(1));
-    assert(processor.postFaderIrAdapter().hasAllFaderThirdIrs());
+    if (hasPrivateAssets)
+    {
+        assert(processor.tapeNamAdapter().hasAnyModel());
+        assert(processor.tapeNamAdapter().hasModelForChannel(0));
+        assert(processor.masterTapeNamAdapter().hasModelForChannel(0));
+        assert(processor.masterTapeNamAdapter().hasModelForChannel(1));
+        assert(processor.emtLimiterNamAdapter().hasModelForChannel(0));
+        assert(processor.emtLimiterNamAdapter().hasModelForChannel(1));
+        assert(processor.finalHiloNamAdapter().hasModelForChannel(0));
+        assert(processor.finalHiloNamAdapter().hasModelForChannel(1));
+        assert(processor.postFaderIrAdapter().hasAllFaderThirdIrs());
+    }
     assert(processor.postFaderIrAdapter().slotForFaderPosition(0.0f).driveLabel == "0db");
     assert(processor.postFaderIrAdapter().slotForFaderPosition(0.5f).driveLabel == "5db");
     assert(processor.postFaderIrAdapter().slotForFaderPosition(1.0f).driveLabel == "10db");
@@ -71,7 +75,8 @@ int main()
     assert(processor.postFaderIrAdapter().slotIndexForFaderDb(-24.0f) == 1);
     assert(processor.postFaderIrAdapter().slotIndexForFaderDb(0.0f) == 2);
     assert(processor.postFaderIrAdapter().slotIndexForFaderDb(core::kFaderGainMaxDb) == 2);
-    assert(processor.mixbusIrAdapter().hasAllMixbusIrs());
+    if (hasPrivateAssets)
+        assert(processor.mixbusIrAdapter().hasAllMixbusIrs());
     assert(processor.mixbusIrAdapter().slotForPeakDb(-18.0f).driveLabel == "0db");
     assert(processor.mixbusIrAdapter().slotForPeakDb(-9.0f).driveLabel == "5db");
     assert(processor.mixbusIrAdapter().slotForPeakDb(-5.0f).driveLabel == "10db");

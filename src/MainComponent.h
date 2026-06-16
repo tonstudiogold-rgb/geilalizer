@@ -52,6 +52,9 @@ private:
     void undoLastRecording();
     void applyTapeSnapshot(const geilalizer::core::TapeMachineSnapshot& snapshot);
     void overwriteRecordedRange(const geilalizer::core::TapeRecordingSpan& span);
+    void syncRealtimeStateFromSessionLocked();
+    void syncRealtimeTrackBuffer(std::size_t channelIndex);
+    void preallocateRecordBuffersForArmedTracks(std::int64_t startFrame);
     void updateTransportStatus();
     void renderToFileAsync(const juce::File& outputFile, double sampleRate, int bitDepth,
                            std::size_t startFrame, std::size_t numFrames, bool fullLength);
@@ -103,6 +106,38 @@ private:
     std::array<std::vector<float>, channelCount> trackBuffers;
     std::vector<std::vector<float>> audioBlockInputs;
     std::vector<float> audioBlockInterleaved;
+    std::array<std::vector<float>, channelCount> audioInputScratch;
+    geilalizer::core::SessionState realtimeSession;
+    geilalizer::core::AudioEngine::RealtimeMeters realtimeMeters;
+    std::array<std::shared_ptr<std::vector<float>>, channelCount> realtimeTrackBuffers;
+
+    struct RealtimeChannelState
+    {
+        std::atomic<float> inputGainDb { 0.0f };
+        std::atomic<float> faderGainDb { 0.0f };
+        std::atomic<float> pan { 0.0f };
+        std::atomic<bool> muted { false };
+        std::atomic<bool> solo { false };
+        std::atomic<bool> armed { false };
+        std::atomic<bool> inputAssigned { false };
+        std::atomic<int> inputChannelIndex { -1 };
+        std::atomic<bool> hasAudioFile { false };
+        std::atomic<std::size_t> lengthFrames { 0 };
+        std::atomic<float> meterPeak { 0.0f };
+    };
+
+    struct RealtimeMasterState
+    {
+        std::atomic<bool> limiterEnabled { true };
+        std::atomic<float> outputTrimDb { 0.0f };
+        std::atomic<float> meterLeftPeak { 0.0f };
+        std::atomic<float> meterRightPeak { 0.0f };
+        std::atomic<bool> limiterActive { false };
+    };
+
+    std::array<RealtimeChannelState, channelCount> realtimeChannels;
+    RealtimeMasterState realtimeMaster;
+    std::atomic<bool> recordingBufferOverrun { false };
 
     std::atomic<bool> playing { false };
     std::atomic<bool> recording { false };

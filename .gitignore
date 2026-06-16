@@ -40,5 +40,9 @@ DerivedData/
 *.flac
 *.mp3
 
+# Proprietary/local machine assets. Do not commit NAM/IR/PDF model packs.
+private_nam_models/
+*.nam
+
 # Logs
 *.log

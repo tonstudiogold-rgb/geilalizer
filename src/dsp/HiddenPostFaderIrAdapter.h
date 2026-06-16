@@ -38,6 +38,7 @@ public:
     const IrSlot& slotForFaderPosition(float normalizedFaderPosition) const;
     const IrSlot& slotForFaderDb(float faderGainDb) const;
     const std::array<IrSlot, kSlotCount>& slots() const { return slots_; }
+    void setSlots(std::array<IrSlot, kSlotCount> slots);
 
     void processChannel(std::size_t channelIndex, float faderGainDb, float* samples, std::size_t numFrames);
 

@@ -129,6 +129,13 @@ bool HiddenIrAdapter::hasIrForPreampIndex(int preampIndex) const
     return tapsForIndex(preampIndex) != nullptr;
 }
 
+void HiddenIrAdapter::setPreampIrSlots(std::array<IrSlot, 11> slots)
+{
+    preampIrSlots_ = std::move(slots);
+    for (auto& channel : channels_)
+        channel.current.setIr(tapsForIndex(channel.activePreampIndex));
+}
+
 void HiddenIrAdapter::processChannel(std::size_t channelIndex, int preampIndex, float* samples, std::size_t numFrames)
 {
     if (samples == nullptr || numFrames == 0 || channelIndex >= channels_.size())
