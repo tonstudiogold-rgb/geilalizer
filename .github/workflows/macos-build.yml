@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish macos-latest release"
+        required: true
+        default: "false"
 
 permissions:
   contents: write
@@ -47,7 +52,7 @@ jobs:
           shasum -a 256 "dist/geilalizer-macos.dmg" > "dist/geilalizer-macos.dmg.sha256"
 
       - name: Upload release assets fallback
-        if: github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
